@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Test TT2000 Tick Generator</title>
+<!-- <meta name="viewport" content="width=device-width, initial-scale=1.0"> -->
+<script src="plotly.js"></script>
+<script src="../das/ticks.js"></script>
+</head>
+
+<body>
+<h1>Test tick generation</h1>
+<p>
+	To use this tool, enter two UTC dates below.  Internally these will be 
+	converted to TT2000 times and then a plot axis will be generated with 
+	reasonable tick marks for the time range.
+</p>
+
+<script>
+function updatePlot(sDivId){
+	console.log("update called for "+sDivId);
+	eDiv = document.getElementById(sDivId);
+	lData = [{x:[1,2,3,4,5], y:[1,4,9,16,25]}];
+	dStyle = {margin: {t:10}};
+	Plotly.newPlot( eDiv, lData, dStyle);
+}
+</script>
+
+<label for="min">ISO-8601 Min Time</label>
+<input name="min" type="text">
+<label for="max">ISO-8601 Max Time</label>
+<input name="max" type="text">
+<button onclick="updatePlot('plot_wnd1')">Update Plot</button>
+<div id="plot_wnd1" 
+	style="width:95%;margin:auto;border:1px solid #6b98e3;margin-top:2em"
+/>
+</div>
+</body>
+</html>
