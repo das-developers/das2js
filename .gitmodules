@@ -1,0 +1,6 @@
+[submodule "deps/das2C"]
+	path = deps/das2C
+	url = https://github.com/das-developers/das2C.git
+[submodule "deps/expat"]
+	path = deps/expat
+	url = https://github.com/libexpat/libexpat.git

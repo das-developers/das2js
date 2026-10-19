@@ -12,13 +12,18 @@ views of the decoded values without a conversion pass.
 **There is nothing usable here yet.**  What exists so far:
 
   * `glue/` - a small flat C interface over das2C, the wasm export surface
-  * `test/` - native-build checks for the glue, requires a built das2C
+  * `test/` - checks for the glue, run both natively and as wasm under node
+  * `deps/` - das2C and expat, pinned as git submodules and compiled in
+  * `buildfiles/` - the hand-written expat configuration for wasm32
   * `notes/` - design notes, including the intended division of labor
 
 Like the other das2C bindings (das2py, das2dlm) this project pins a specific
 das2C version and compiles it in, rather than tracking das2C head.  The
 idiomatic layer, an ES module wrapping fetch() and typed arrays, has not been
-started.  No wasm module has even been built yet; only the native test runs.
+started.  What does work: `make wasm` cross-compiles das2C and expat to wasm32
+and runs the glue test under node.  `notes/build.md` walks through the
+toolchain setup and a full test pass; `git submodule update --init` fetches
+the pinned sources.
 
 This repository was started in 2022 and promptly went dormant.  It is active
 again as of October 2026, though if you need a working das client today,
