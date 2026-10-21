@@ -9,21 +9,25 @@ compiling [das2C](https://github.com/das-developers/das2C) to WebAssembly, so
 parsing and value decoding happen in C and JavaScript receives typed-array
 views of the decoded values without a conversion pass.
 
-**There is nothing usable here yet.**  What exists so far:
+**Early days, but it runs.**  `make module` produces a three-file ES module
+in `build.wasm32/` (`das2js.mjs`, `das2c.mjs`, `das2c.wasm`) that fetches a
+das stream, parses it as it arrives, and hands back TypedArray views of the
+decoded values, int64 and all.  It has read real data from a public dasFlex
+server in Firefox.  No package, no minified build, no catalog browser, no
+plotting; see `notes/design.md` for what is planned.  Layout:
 
+  * `src/` - the hand-written ES module, one file
   * `glue/` - a small flat C interface over das2C, the wasm export surface
-  * `test/` - checks for the glue, run both natively and as wasm under node
+  * `test/` - the glue test (native and wasm under node) and the browser
+    tests (headless Firefox via a node runner)
   * `deps/` - das2C and expat, pinned as git submodules and compiled in
   * `buildfiles/` - the hand-written expat configuration for wasm32
-  * `notes/` - design notes, including the intended division of labor
+  * `notes/` - design decisions, build recipe, measurements
 
 Like the other das2C bindings (das2py, das2dlm) this project pins a specific
-das2C version and compiles it in, rather than tracking das2C head.  The
-idiomatic layer, an ES module wrapping fetch() and typed arrays, has not been
-started.  What does work: `make wasm` cross-compiles das2C and expat to wasm32
-and runs the glue test under node.  `notes/build.md` walks through the
-toolchain setup and a full test pass; `git submodule update --init` fetches
-the pinned sources.
+das2C version and compiles it in, rather than tracking das2C head.
+`notes/build.md` walks through the toolchain setup and a full test pass;
+`git submodule update --init` fetches the pinned sources.
 
 This repository was started in 2022 and promptly went dormant.  It is active
 again as of October 2026, though if you need a working das client today,
