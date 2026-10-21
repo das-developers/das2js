@@ -25,6 +25,15 @@ live spectrogram are the planned demos.  Layout:
   * `buildfiles/` - the hand-written expat configuration for wasm32
   * `notes/` - build recipe, measurements
 
+**It is fast.**  A full day of Juno Waves burst waveforms, 505 MB of
+samples, parses in Firefox in under 300 ms once the bytes are in memory,
+about 1.7 GB/s, and the first record is usable half a second after the
+request goes out while the server spends the next 36 s producing the rest.
+No JSON on the wire, no number conversion in JavaScript: the values arrive
+in their native binary encoding and the browser reads them where they
+landed.  Screenshot of the live run: [notes/jno_wav_burst_perf.png](notes/jno_wav_burst_perf.png);
+method and more streams in [notes/performance.md](notes/performance.md).
+
 Like the other das2C bindings (das2py, das2dlm) this project compiles a
 pinned das2C commit in rather than linking a system copy.  Until das2C
 v3.0.0 is tagged that commit is on das2C master.  `notes/build.md` covers

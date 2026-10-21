@@ -53,12 +53,15 @@ against the dasFlex server at space.physics.uiowa.edu:
 |-----------------------------------------|---------:|------:|-------------:|---------:|-----:|
 | Juno Waves survey, 2 days, 86.4 s bins  |   1.2 MB | 18.9 s |       485 ms |    55 ms |   21 |
 | Juno Waves burst waveforms, 1 day       |   505 MB | 37.0 s |       466 ms |   330 ms | 1460 |
+| same stream, in a Firefox window        |   505 MB | 36.3 s |       506 ms |   288 ms | 1673 |
 
 Wall time is dominated by the server: the burst day took `curl` the same
 36 s, so parsing inside the download is free, and a progressive display can
 start drawing half a second after the request.  The burst stream is
 little-endian floats, which the parser copies at memory speed; the survey
-is a das2 stream with text in it.
+is a das2 stream with text in it.  The last row is the page as it looks
+after the burst run, [jno_wav_burst_perf.png](jno_wav_burst_perf.png);
+viewing all 126 million elements costs 1 ms because the views are not copies.
 
 Memory: the parsed burst day occupied 1.5 GB of WebAssembly heap for 505 MB
 of values, because arrays grow by doubling and the heap never shrinks.
