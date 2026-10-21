@@ -89,11 +89,18 @@ DAS_WASM_API const char* daswasm_lastError(void);
 
 /** The shape sentinel meaning an index is ragged (varies with prior
  * indices).  Appears in daswasm_ds_shapeAt, daswasm_var_shapeAt and
- * daswasm_ary_shapeAt results. */
+ * daswasm_ary_shapeAt results.  All sentinels are negative; any value
+ * greater than this one is a real extent. */
 DAS_WASM_API int daswasm_idxRagged(void);
 
 /** The shape sentinel meaning a variable does not vary along an index. */
 DAS_WASM_API int daswasm_idxUnused(void);
+
+/** The shape sentinel meaning a variable has no extent of its own along an
+ * index and borrows the dataset's.  Seen on sequences and other computed
+ * variables that run along a ragged index: the offset of a variable length
+ * waveform has as many values per record as the waveform does. */
+DAS_WASM_API int daswasm_idxBorrow(void);
 
 /* ************************************************************************ */
 /** Stream reader context: a feed-mode DasIO coupled to a DasDsBldr, plus
@@ -214,7 +221,10 @@ DAS_WASM_API const char* daswasm_ds_group(const DasDs* pDs);
 DAS_WASM_API int daswasm_ds_rank(const DasDs* pDs);
 
 /** Extent of the i-th bulk index: a count, or the ragged sentinel.  The
- * first index is the stream-append direction and grows as packets arrive. */
+ * first index is the stream-append direction and grows as packets arrive;
+ * it is 0 for a dataset whose header has landed but whose data has not,
+ * which is routine mid-stream and permanent when a producer declares a
+ * packet type it never emits (das2C examples/ex08, packet id 06). */
 DAS_WASM_API int daswasm_ds_shapeAt(const DasDs* pDs, int i);
 
 /** Number of physical dimensions.  bCoord != 0 counts coordinate
@@ -253,9 +263,10 @@ DAS_WASM_API const char* daswasm_var_units(const DasVar* pVar);
  * their component names come from daswasm_var_compSym(). */
 DAS_WASM_API const char* daswasm_var_valType(const DasVar* pVar);
 
-/** Extent of a variable along the i-th BULK dataset index: a count, the
- * ragged sentinel, or the unused sentinel where the variable repeats
- * (broadcasts) along that index.  i runs to daswasm_ds_rank(). */
+/** Extent of a variable along the i-th BULK dataset index: a count (0 for
+ * no records yet), the ragged sentinel, the borrow sentinel, or the unused
+ * sentinel where the variable repeats (broadcasts) along that index.  i
+ * runs to daswasm_ds_rank(). */
 DAS_WASM_API int daswasm_var_shapeAt(const DasVar* pVar, int i);
 
 /** Number of intrinsic (per-record internal) indices: 0 for scalars, 1 for
@@ -290,10 +301,27 @@ DAS_WASM_API DasAry* daswasm_var_ary(DasVar* pVar);
  * including why variable length blobs are refused).  One copy is made.
  * Free the result with daswasm_ary_free().
  *
+ * Fails for a variable that BORROWS an extent (see daswasm_idxBorrow);
+ * such a variable has no shape of its own to square off to, so use
+ * daswasm_var_qubeLike() with a donor.
+ *
  * @returns a new DasAry owning its memory, or NULL on error
  * @memberof DasVar
  */
 DAS_WASM_API DasAry* daswasm_var_qube(DasVar* pVar);
+
+/** daswasm_var_qube() wearing another variable's shape.
+ *
+ * The offset sequence of a variable length waveform runs along the
+ * waveform's ragged index with no extent of its own; the waveform
+ * variable is the donor that says how many offsets each record needs.
+ * Any variable of the same dataset with a settled extent along the
+ * borrowed index will do.  pShapeFrom NULL is daswasm_var_qube().
+ *
+ * @returns a new DasAry owning its memory, or NULL on error
+ * @memberof DasVar
+ */
+DAS_WASM_API DasAry* daswasm_var_qubeLike(DasVar* pVar, const DasVar* pShapeFrom);
 
 /* ************************************************************************ */
 /* Arrays: the actual bytes */
@@ -322,13 +350,39 @@ DAS_WASM_API int daswasm_ary_size(const DasAry* pAry);
  * C index order.  For "text" and "byteseq" arrays the elements are
  * internal pointers; use daswasm_ary_textAt() instead.
  *
- * @returns the element pointer, or NULL for an empty array
+ * @returns the element pointer, or NULL for an empty array (which is not
+ *          an error: check daswasm_ary_size() first)
  * @memberof DasAry
  */
 DAS_WASM_API const ubyte* daswasm_ary_data(DasAry* pAry);
 
 /** The i-th string of a "text" array (flat index), NULL if out of range */
 DAS_WASM_API const char* daswasm_ary_textAt(DasAry* pAry, int i);
+
+/* Partial-index access, for ragged arrays.
+ *
+ * The flat daswasm_ary_data() view is only navigable when every index has
+ * a fixed extent.  A ragged array (variable length waveforms, utf8 strings
+ * stored as byte runs, a differing number of items per record) needs the
+ * extent of each sub-array looked up as the walk descends.  These take a
+ * PARTIAL location: the first nLoc indices, nLoc from 0 to rank - 1, and
+ * answer for the sub-array underneath.  Text variables use this path: a
+ * "char*" variable is usually backed by a "ubyte" array one rank higher,
+ * whose last index runs over the bytes of each string. */
+
+/** Extent of the next index below a partial location.  Equals
+ * daswasm_ary_shapeAt(nLoc) unless that index is ragged.  -1 on error. */
+DAS_WASM_API int daswasm_ary_lengthAt(const DasAry* pAry, const int* pLoc, int nLoc);
+
+/** Total elements in the sub-array at a partial location; the number of
+ * elements daswasm_ary_dataAt() points to.  -1 on error. */
+DAS_WASM_API int daswasm_ary_sizeAt(DasAry* pAry, const int* pLoc, int nLoc);
+
+/** Pointer to the first element of the (contiguous) sub-array at a partial
+ * location, NULL if empty or out of range.  Zero-copy like
+ * daswasm_ary_data(), of which it is the generalization: nLoc = 0 gives the
+ * same answer. */
+DAS_WASM_API const ubyte* daswasm_ary_dataAt(DasAry* pAry, const int* pLoc, int nLoc);
 
 /** Convert a "time" element array to doubles.
  *

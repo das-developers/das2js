@@ -60,6 +60,33 @@ static DasWasmRdr* readFile(const char* sPath, size_t uChunk)
 	return pRdr;
 }
 
+/* For a variable that borrows an extent along some index, find a variable
+   in the same dataset with a settled extent there: the first array-backed
+   one that is sized or ragged along that index.  NULL if none borrows. */
+static DasVar* shapeDonor(DasDs* pDs, DasVar* pVar)
+{
+	int nRank = daswasm_ds_rank(pDs);
+	int iBorrow = -1;
+	for(int i = 0; i < nRank; ++i)
+		if(daswasm_var_shapeAt(pVar, i) == daswasm_idxBorrow()){ iBorrow = i; break; }
+	if(iBorrow < 0) return NULL;
+
+	for(int iKind = 0; iKind < 2; ++iKind){
+		int nDims = daswasm_ds_dimCount(pDs, iKind);
+		for(int iDim = 0; iDim < nDims; ++iDim){
+			DasDim* pDim = daswasm_ds_dimAt(pDs, iDim, iKind);
+			int nVars = daswasm_dim_varCount(pDim);
+			for(int iVar = 0; iVar < nVars; ++iVar){
+				DasVar* pOther = daswasm_dim_varAt(pDim, iVar);
+				if(daswasm_var_ary(pOther) == NULL) continue;
+				int nExt = daswasm_var_shapeAt(pOther, iBorrow);
+				if((nExt > 0)||(nExt == daswasm_idxRagged())) return pOther;
+			}
+		}
+	}
+	return NULL;
+}
+
 /* Walk every dataset the way the JS module will, checking self-consistency */
 static int walkStream(DasStream* pSd, const char* sPath)
 {
@@ -73,7 +100,13 @@ static int walkStream(DasStream* pSd, const char* sPath)
 
 		int nRank = daswasm_ds_rank(pDs);
 		CHECK(nRank >= 1, "dataset with no bulk indices");
-		CHECK(daswasm_ds_shapeAt(pDs, 0) > 0, "dataset with no records");
+
+		/* A header without data is legal (ex08 declares packet id 06 and
+		   never sends one); the metadata must still walk, values are empty */
+		int nRecs = daswasm_ds_shapeAt(pDs, 0);
+		CHECK(nRecs >= 0, "negative record count");
+		if(nRecs == 0)
+			printf("INFO: %s: dataset '%s' has a header but no records\n", sPath, daswasm_ds_id(pDs));
 
 		int nCoord = daswasm_ds_dimCount(pDs, 1);
 		int nData  = daswasm_ds_dimCount(pDs, 0);
@@ -98,16 +131,30 @@ static int walkStream(DasStream* pSd, const char* sPath)
 					CHECK(daswasm_var_units(pVar) != NULL, "variable units may not be NULL");
 
 					/* every variable answers over the whole dataset: along each
-					   bulk index it is either sized, ragged, or broadcast */
+					   bulk index it is either sized, ragged, borrowing the
+					   dataset's extent, or broadcast */
 					for(int i = 0; i < nRank; ++i){
 						int nExt = daswasm_var_shapeAt(pVar, i);
-						CHECK((nExt > 0)||(nExt == daswasm_idxRagged())||
-						      (nExt == daswasm_idxUnused()),
+						CHECK((nExt >= 0)||(nExt == daswasm_idxRagged())||
+						      (nExt == daswasm_idxBorrow())||(nExt == daswasm_idxUnused()),
 						      "variable shape entry out of contract");
 					}
 
 					/* Zero-copy path: array-backed variables expose real bytes */
 					DasAry* pAry = daswasm_var_ary(pVar);
+					/* ...unless the variable does not vary along records at all:
+					   a das2 frequency table is fully present with zero records */
+					if((pAry != NULL)&&(nRecs == 0)&&
+					   (daswasm_var_shapeAt(pVar, 0) != daswasm_idxUnused())){
+						CHECK(daswasm_ary_size(pAry) == 0, "empty dataset with a non-empty record array");
+						CHECK(daswasm_ary_data(pAry) == NULL, "empty array with a data pointer");
+						if(DasAry_valType(pAry) == vtTime){
+							double* pSec = daswasm_ary_times(pAry);
+							CHECK(pSec != NULL, "time conversion of an empty array failed");
+							daswasm_free(pSec);
+						}
+						continue;
+					}
 					if(pAry != NULL){
 						CHECK(daswasm_ary_size(pAry) > 0, "backing array is empty");
 						CHECK(daswasm_ary_valSize(pAry) > 0, "element size is zero");
@@ -125,6 +172,25 @@ static int walkStream(DasStream* pSd, const char* sPath)
 						if(DasAry_valType(pAry) == vtText)
 							CHECK(daswasm_ary_textAt(pAry, 0) != NULL, "no first string");
 
+						/* Partial-index access must agree with the flat view at
+						   the top, and the per-record sub-arrays must tile it
+						   exactly, ragged or not */
+						int nRecs = daswasm_ary_lengthAt(pAry, NULL, 0);
+						CHECK(nRecs == daswasm_ary_shapeAt(pAry, 0), "lengthAt(0) is not the record count");
+						CHECK(daswasm_ary_sizeAt(pAry, NULL, 0) == daswasm_ary_size(pAry), "sizeAt(0) is not the size");
+						CHECK(daswasm_ary_dataAt(pAry, NULL, 0) == daswasm_ary_data(pAry), "dataAt(0) is not data");
+						int nTiled = 0;
+						const ubyte* pExpect = daswasm_ary_data(pAry);
+						for(int iRec = 0; iRec < nRecs; ++iRec){
+							int nSub = daswasm_ary_sizeAt(pAry, &iRec, 1);
+							CHECK(nSub >= 0, "sizeAt(record) failed");
+							if(nSub > 0)
+								CHECK(daswasm_ary_dataAt(pAry, &iRec, 1) == pExpect, "record sub-array not contiguous with predecessor");
+							pExpect += nSub * daswasm_ary_valSize(pAry);
+							nTiled += nSub;
+						}
+						CHECK(nTiled == daswasm_ary_size(pAry), "record sub-arrays do not tile the array");
+
 						if(DasAry_valType(pAry) == vtTime){
 							double* pSec = daswasm_ary_times(pAry);
 							CHECK(pSec != NULL, "time conversion failed");
@@ -136,8 +202,10 @@ static int walkStream(DasStream* pSd, const char* sPath)
 					}
 
 					/* Universal fallback: a qube of any numeric variable */
-					if(daswasm_var_isNumeric(pVar)){
-						DasAry* pQube = daswasm_var_qube(pVar);
+					if(daswasm_var_isNumeric(pVar) && (nRecs > 0)){
+						DasAry* pQube = daswasm_var_qubeLike(pVar, shapeDonor(pDs, pVar));
+						if(pQube == NULL)
+							printf("ERROR: %s\n", daswasm_lastError());
 						CHECK(pQube != NULL, "numeric variable refused to materialize");
 						CHECK(daswasm_ary_size(pQube) > 0, "materialized qube is empty");
 						CHECK(daswasm_ary_data(pQube) != NULL, "qube without data");
@@ -176,12 +244,16 @@ int main(int argc, char** argv)
 {
 	daswasm_init(argv[0]);
 
-	/* A vector das3 binary, a rank 2 string das3 stream, and a das2 text
-	   stream that exercises the up-convert path and vtTime arrays */
+	/* A vector das3 binary, a rank 2 string das3 stream, a das2 text
+	   stream that exercises the up-convert path and vtTime arrays, and a
+	   ragged waveform stream for the partial-index access */
 	const char* aFiles[] = {
 		"examples/ex17_vector_noframe.d3b",
 		"examples/ex35_strings_rank2.d3b",
 		"examples/ex01_polar_mfe.d2t",
+		"examples/ex19_cassini_ragged_wfrm.d3t",
+		"examples/ex08_cassini_rpws_survey.d2t",   /* headers after data */
+		"examples/ex09_juno_waves_survey.d2t",
 		NULL
 	};
 

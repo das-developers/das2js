@@ -53,6 +53,8 @@ int daswasm_idxRagged(void){ return VARIDX_RAGGED; }
 
 int daswasm_idxUnused(void){ return VARIDX_UNUSED; }
 
+int daswasm_idxBorrow(void){ return VARIDX_BORROW; }
+
 /* ************************************************************************* */
 /* Reader context */
 
@@ -312,11 +314,16 @@ int daswasm_var_isNumeric(const DasVar* pVar)
 
 DasAry* daswasm_var_ary(DasVar* pVar){ return DasVar_getAry(pVar); }
 
-DasAry* daswasm_var_qube(DasVar* pVar)
+DasAry* daswasm_var_qubeLike(DasVar* pVar, const DasVar* pShapeFrom)
 {
 	ptrdiff_t aShape[VARIDX_MAX] = VARIDX_INIT_UNUSED;
 	int nRank = DasVar_shape(pVar, aShape);
-	return DasVar_materializeQube(pVar, nRank, NULL, NULL, NULL);
+	return DasVar_materializeQube(pVar, nRank, NULL, NULL, pShapeFrom);
+}
+
+DasAry* daswasm_var_qube(DasVar* pVar)
+{
+	return daswasm_var_qubeLike(pVar, NULL);
 }
 
 /* ************************************************************************* */
@@ -363,16 +370,67 @@ const char* daswasm_ary_textAt(DasAry* pAry, int i)
 	return pStrs[i];
 }
 
+/* The foreign side speaks int; das2C indexes with ptrdiff_t.  Widen into
+ * a fixed local, bounded by the maximum array rank das2C supports. */
+static int _daswasm_loc(const DasAry* pAry, const int* pLoc, int nLoc, ptrdiff_t* aLoc)
+{
+	if((nLoc < 0)||(nLoc > ARYIDX_MAX)||(nLoc > DasAry_rank(pAry))){
+		das_error(DASERR_ARRAY, "Partial index of length %d out of range for rank %d array",
+		          nLoc, DasAry_rank(pAry));
+		return -1;
+	}
+	for(int i = 0; i < nLoc; ++i)
+		aLoc[i] = pLoc[i];
+	return nLoc;
+}
+
+int daswasm_ary_lengthAt(const DasAry* pAry, const int* pLoc, int nLoc)
+{
+	ptrdiff_t aLoc[ARYIDX_MAX];
+	if(_daswasm_loc(pAry, pLoc, nLoc, aLoc) < 0)
+		return -1;
+	/* a complete index has nothing below it */
+	if(nLoc == DasAry_rank(pAry))
+		return 1;
+	return (int)DasAry_lengthIn(pAry, nLoc, aLoc);
+}
+
+int daswasm_ary_sizeAt(DasAry* pAry, const int* pLoc, int nLoc)
+{
+	ptrdiff_t aLoc[ARYIDX_MAX];
+	size_t uVals = 0;
+	if(_daswasm_loc(pAry, pLoc, nLoc, aLoc) < 0)
+		return -1;
+	if(DasAry_getIn(pAry, DasAry_valType(pAry), nLoc, aLoc, &uVals) == NULL)
+		return 0;
+	return (int)uVals;
+}
+
+const ubyte* daswasm_ary_dataAt(DasAry* pAry, const int* pLoc, int nLoc)
+{
+	ptrdiff_t aLoc[ARYIDX_MAX];
+	size_t uVals = 0;
+	if(_daswasm_loc(pAry, pLoc, nLoc, aLoc) < 0)
+		return NULL;
+	return DasAry_getIn(pAry, DasAry_valType(pAry), nLoc, aLoc, &uVals);
+}
+
 double* daswasm_ary_times(DasAry* pAry)
 {
 	size_t uVals = 0;
 	if(DasAry_valType(pAry) != vtTime)
 		return NULL;
 	const das_time* pTimes = DasAry_getTimesIn(pAry, DIM0, &uVals);
-	if(pTimes == NULL)
-		return NULL;
 
-	double* pOut = (double*)malloc(uVals * sizeof(double));
+	/* An empty time array (header landed, no data yet) has no element
+	 * pointer, and malloc(0) may legally return NULL too.  Neither is a
+	 * failure, so hand back a real buffer of zero useful doubles. */
+	if((pTimes == NULL)&&(DasAry_size(pAry) != 0))
+		return NULL;
+	if(pTimes == NULL)
+		uVals = 0;
+
+	double* pOut = (double*)malloc((uVals > 0 ? uVals : 1) * sizeof(double));
 	if(pOut == NULL){
 		das_error(DASERR_ARRAY, "Couldn't allocate %zu doubles", uVals);
 		return NULL;
