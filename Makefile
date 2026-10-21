@@ -7,8 +7,19 @@
 # Targets:
 #
 #   make wasm        cross-compile libexpat.a and libdas3.a to wasm32, build
-#                    test/TestWasm.c against them, run it under node.  The
-#                    current milestone; the browser module comes next.
+#                    test/TestWasm.c against them, run it under node
+#   make module      the browser deliverable in build.wasm32/: das2c.wasm, its
+#                    emscripten loader das2c.mjs, and the hand-written ES
+#                    module das2js.mjs copied from src/
+#   make browser     build the module and run test/browser/ under headless
+#                    Firefox via a small node runner (Firefox only, see
+#                    notes/design.md)
+#   make live        the same against a public dasFlex server over the network
+#   make local       the same against ../dasflex (DASFLEX=... to point elsewhere)
+#                    through test/dasflex_cgi.py, a CGI shim; no Apache needed
+#   make serve       serve the build and a test page on http://127.0.0.1:9099
+#                    for a browser you drive yourself (PAGE=TestLive.html,
+#                    RUNFLAGS=--dasflex to add the local dasFlex); Ctrl-C stops
 #   make wasm_test   run das2C's own regression suite as wasm under node
 #   make test        native build of the glue plus TestWasm against a native
 #                    deps/das2C, for debugging the glue with ordinary tools
@@ -68,9 +79,35 @@ WASM_CFLAGS=-std=c99 -Wall -Werror -O2 -g -I$(DAS2C) -Iglue --use-port=zlib
 # -g keeps DWARF in the .wasm, which makes emcc warn that wasm-opt ran fewer
 # passes; -Werror on the same command line would turn that into a failed
 # link, so the warning is waived here.
-# The browser module will use none of these.
+# The browser module uses none of these.
 WASM_TEST_LFLAGS=--use-port=zlib -sENVIRONMENT=node -sNODERAWFS=1 \
  -sEXIT_RUNTIME=1 -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1048576 \
+ -Wno-limited-postlink-optimizations
+
+# Browser module link.  MODULARIZE + EXPORT_ES6 turns the loader into an ES
+# module exporting one factory function (EXPORT_NAME) that resolves to the
+# runtime once the .wasm is instantiated; nothing runs at import time.  No
+# filesystem: streams arrive through DasWasmRdr_feed, never fopen.  The C
+# export surface is marked EMSCRIPTEN_KEEPALIVE in glue/wasm.h, so only the
+# allocator the JS side needs for its scratch buffers is listed here.  The
+# HEAP* views are what the JS wraps TypedArrays around, hence exported.
+# Only the runtime helpers the JS actually uses are exported: cwrap to bind
+# the glue functions once at load time, HEAPU8 and HEAP32 to reach the heap.
+# The other typed views (HEAP16, HEAPF64, HEAP64...) are not exported because
+# das2js.mjs builds its own TypedArrays over HEAPU8.buffer, so BigInt64Array
+# over TT2000 values needs nothing extra here, not even WASM_BIGINT (no glue
+# signature carries an int64 across the call boundary).  ccall is left out
+# on purpose: it re-marshals on every call and would hand downstream a slow
+# path we would rather they did not find.  The 1 MiB stack stays: das2C has
+# large automatics.
+MODULE=$(WBD)/das2c.mjs
+JS_SRCS=$(wildcard src/*.mjs)
+JS_OUT=$(patsubst src/%,$(WBD)/%,$(JS_SRCS))
+WASM_MOD_LFLAGS=--use-port=zlib -sMODULARIZE=1 -sEXPORT_ES6=1 \
+ -sEXPORT_NAME=createDas3Module -sENVIRONMENT=web,worker -sFILESYSTEM=0 \
+ -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1048576 \
+ -sEXPORTED_FUNCTIONS=_malloc,_free \
+ -sEXPORTED_RUNTIME_METHODS=cwrap,HEAPU8,HEAP32 \
  -Wno-limited-postlink-optimizations
 
 ## Native ####################################################################
@@ -107,6 +144,37 @@ $(EXPAT_LIB): $(EXPAT_OBJS)
 $(WBD)/expat_%.o: $(EXPAT_SRC)/%.c buildfiles/expat_config.h | $(WBD)
 	$(EMCC) -c $(EXPAT_CFLAGS) -o $@ $<
 
+module: $(MODULE) $(JS_OUT)
+
+$(MODULE): glue/wasm.c glue/wasm.h $(DAS2C_WASM_LIB) $(EXPAT_LIB) | $(WBD)
+	$(EMCC) $(WASM_CFLAGS) glue/wasm.c $(DAS2C_WASM_LIB) $(EXPAT_LIB) $(WASM_MOD_LFLAGS) -o $@
+
+# The ES module sits beside the loader it imports, so one directory is the
+# whole deliverable
+$(WBD)/%.mjs: src/%.mjs | $(WBD)
+	cp $< $@
+
+browser: module
+	$(NODE) test/browser/run.mjs
+
+# Same runner, real server: needs the network and a public dasFlex that is up
+live: module
+	$(NODE) test/browser/run.mjs TestLive.html
+
+# Same page against the dasFlex checkout next door, served through the CGI
+# shim in test/dasflex_cgi.py; no network, no Apache.  A sibling checkout
+# rather than a submodule on purpose: a test server should track head.
+DASFLEX?=../dasflex
+local: module
+	$(NODE) test/browser/run.mjs TestLive.html --dasflex=$(DASFLEX)
+
+# No headless Firefox: the runner prints a URL and waits.  Load it, read the
+# page and the devtools console, edit, reload.  Needed because file:// cannot
+# load ES modules or .wasm, so "just open the html" does not work.
+PAGE?=TestModule.html
+serve: module
+	$(NODE) test/browser/run.mjs $(PAGE) --serve $(RUNFLAGS)
+
 wasm_test: $(EXPAT_LIB)
 	$(MAKE) -C $(DAS2C) EMSCRIPTEN=yes EXPAT_INC=$(EXPAT_INC) EXPAT_LIB=$(EXPAT_LIB) test
 
@@ -119,4 +187,4 @@ clean:
 	rm -rf build.*
 
 FORCE:
-.PHONY: test wasm wasm_test clean FORCE
+.PHONY: test wasm module browser live local serve wasm_test clean FORCE
