@@ -12,8 +12,9 @@
 #                    emscripten loader das2c.mjs, and the hand-written ES
 #                    module das2js.mjs copied from src/
 #   make browser     build the module and run test/browser/ under headless
-#                    Firefox via a small node runner (Firefox only, see
-#                    notes/design.md)
+#                    Firefox via a small node runner (Firefox only; it is
+#                    what is installed here and --no-remote keeps it out of
+#                    the developer's own session)
 #   make live        the same against a public dasFlex server over the network
 #   make local       the same against ../dasflex (DASFLEX=... to point elsewhere)
 #                    through test/dasflex_cgi.py, a CGI shim; no Apache needed

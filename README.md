@@ -14,7 +14,8 @@ in `build.wasm32/` (`das2js.mjs`, `das2c.mjs`, `das2c.wasm`) that fetches a
 das stream, parses it as it arrives, and hands back TypedArray views of the
 decoded values, int64 and all.  It has read real data from a public dasFlex
 server in Firefox.  No package, no minified build, no catalog browser, no
-plotting; see `notes/design.md` for what is planned.  Layout:
+plotting; a progress meter, a source picker, a catalog tree view and a
+live spectrogram are the planned demos.  Layout:
 
   * `src/` - the hand-written ES module, one file
   * `glue/` - a small flat C interface over das2C, the wasm export surface
@@ -22,12 +23,13 @@ plotting; see `notes/design.md` for what is planned.  Layout:
     tests (headless Firefox via a node runner)
   * `deps/` - das2C and expat, pinned as git submodules and compiled in
   * `buildfiles/` - the hand-written expat configuration for wasm32
-  * `notes/` - design decisions, build recipe, measurements
+  * `notes/` - build recipe, measurements
 
-Like the other das2C bindings (das2py, das2dlm) this project pins a specific
-das2C version and compiles it in, rather than tracking das2C head.
-`notes/build.md` walks through the toolchain setup and a full test pass;
-`git submodule update --init` fetches the pinned sources.
+Like the other das2C bindings (das2py, das2dlm) this project compiles a
+pinned das2C commit in rather than linking a system copy.  Until das2C
+v3.0.0 is tagged that commit is on das2C master.  `notes/build.md` covers
+the toolchain, the build and the tests; `git submodule update --init`
+fetches the pinned sources.
 
 This repository was started in 2022 and promptly went dormant.  It is active
 again as of October 2026, though if you need a working das client today,
