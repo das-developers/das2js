@@ -10,7 +10,8 @@
 #                    test/TestWasm.c against them, run it under node
 #   make module      the browser deliverable in build.wasm32/: das2c.wasm, its
 #                    emscripten loader das2c.mjs, and the hand-written ES
-#                    module das2js.mjs copied from src/
+#                    module das2js.mjs copied from src/.  DEBUG=yes keeps
+#                    the C debug info (about 5x the .wasm size)
 #   make browser     build the module and run test/browser/ under headless
 #                    Firefox via a small node runner (Firefox only; it is
 #                    what is installed here and --no-remote keeps it out of
@@ -73,7 +74,9 @@ EXPAT_CFLAGS=-O2 -g -I$(EXPAT_INC) -Ibuildfiles
 
 DAS2C_WASM_LIB=$(DAS2C)/build.wasm32/libdas3.a
 
-WASM_CFLAGS=-std=c99 -Wall -Werror -O2 -g -I$(DAS2C) -Iglue --use-port=zlib
+# No -g here: whether DWARF ships is decided at link time, per output below.
+# The libdas3.a and libexpat.a objects keep theirs either way.
+WASM_CFLAGS=-std=c99 -Wall -Werror -O2 -I$(DAS2C) -Iglue --use-port=zlib
 
 # NODERAWFS mounts the real filesystem so the test reads fixtures in place,
 # nothing embedded.  EXIT_RUNTIME turns main()'s return into the exit status.
@@ -83,7 +86,16 @@ WASM_CFLAGS=-std=c99 -Wall -Werror -O2 -g -I$(DAS2C) -Iglue --use-port=zlib
 # The browser module uses none of these.
 WASM_TEST_LFLAGS=--use-port=zlib -sENVIRONMENT=node -sNODERAWFS=1 \
  -sEXIT_RUNTIME=1 -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1048576 \
- -Wno-limited-postlink-optimizations
+ -g -Wno-limited-postlink-optimizations
+
+# The shipped module carries no debug info.  -g at this link would keep the
+# DWARF from every das2C and expat object and make das2c.wasm about 2.2 MB
+# instead of 450 KB.  DEBUG=yes puts it back for stepping through the C in a
+# browser debugger, and is why the module link keeps the warning waiver too.
+# Run make clean first: nothing here notices DEBUG changing.
+ifeq ($(DEBUG),yes)
+MOD_DEBUG=-g
+endif
 
 # Browser module link.  MODULARIZE + EXPORT_ES6 turns the loader into an ES
 # module exporting one factory function (EXPORT_NAME) that resolves to the
@@ -148,7 +160,7 @@ $(WBD)/expat_%.o: $(EXPAT_SRC)/%.c buildfiles/expat_config.h | $(WBD)
 module: $(MODULE) $(JS_OUT)
 
 $(MODULE): glue/wasm.c glue/wasm.h $(DAS2C_WASM_LIB) $(EXPAT_LIB) | $(WBD)
-	$(EMCC) $(WASM_CFLAGS) glue/wasm.c $(DAS2C_WASM_LIB) $(EXPAT_LIB) $(WASM_MOD_LFLAGS) -o $@
+	$(EMCC) $(WASM_CFLAGS) $(MOD_DEBUG) glue/wasm.c $(DAS2C_WASM_LIB) $(EXPAT_LIB) $(WASM_MOD_LFLAGS) -o $@
 
 # The ES module sits beside the loader it imports, so one directory is the
 # whole deliverable

@@ -35,6 +35,10 @@ ships 3.6), bracket the line with two exports.  The second is not a typo:
 The deliverable is three files in `build.wasm32/`: `das2js.mjs` (the module
 you import), `das2c.mjs` (its loader) and `das2c.wasm`.  Keep them together.
 
+`make clean module DEBUG=yes` builds a version that keeps the C debug
+information, for stepping through das2C in a browser debugger.  It is about
+five times larger, so rebuild without it before deploying.
+
 ## Test
 
 Each target builds what it needs.  ERROR lines inside a run are expected
