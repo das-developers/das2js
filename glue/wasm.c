@@ -14,8 +14,13 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <math.h>
 
 #include <das3/core.h>
+#include <das3/generator.h>
+#include <das3/form.h>
 #include "wasm.h"
 
 /* ************************************************************************* */
@@ -450,4 +455,509 @@ void daswasm_free(void* pBuf)
 {
 	if(pBuf != NULL)
 		free(pBuf);
+}
+
+/* ************************************************************************* */
+/* Metadata snapshot
+ *
+ * One call per dataset returns its whole structure as JSON.  The structure
+ * is fixed once the header packet has been parsed (only the record count
+ * grows afterwards), so a foreign caller parses this once and keeps plain
+ * objects, instead of making a C call per field per tick.  The key
+ * vocabulary follows the das3 XML attribute names where they exist; see the
+ * description in wasm.h.  Pointers ride along as "ptr" so the caller can
+ * reach the live objects (record counts, value buffers) without re-walking.
+ */
+
+typedef struct jbuf {
+	char* s;
+	size_t len;
+	size_t cap;
+	int err;
+} JBuf;
+
+static int _jb_reserve(JBuf* b, size_t uMore)
+{
+	if(b->err) return 0;
+	if(b->len + uMore + 1 <= b->cap) return 1;
+	size_t uCap = (b->cap > 0) ? b->cap : 1024;
+	while(uCap < b->len + uMore + 1) uCap *= 2;
+	char* sNew = (char*)realloc(b->s, uCap);
+	if(sNew == NULL){
+		b->err = das_error(DASERR_DS, "Couldn't allocate %zu bytes for a snapshot", uCap);
+		return 0;
+	}
+	b->s = sNew;
+	b->cap = uCap;
+	return 1;
+}
+
+static void _jb_raw(JBuf* b, const char* s)
+{
+	size_t n = strlen(s);
+	if(!_jb_reserve(b, n)) return;
+	memcpy(b->s + b->len, s, n);
+	b->len += n;
+	b->s[b->len] = '\0';
+}
+
+/* JSON needs a comma between siblings but not after an opener or a key.
+   Looking at the previous byte is enough to tell the cases apart, which
+   saves threading a "first item" flag through every emitter. */
+static void _jb_item(JBuf* b)
+{
+	if(b->len == 0) return;
+	char c = b->s[b->len - 1];
+	if((c != '{')&&(c != '[')&&(c != ':'))
+		_jb_raw(b, ",");
+}
+
+/* Quoted and escaped.  UTF-8 passes through untouched, JSON is UTF-8. */
+static void _jb_str(JBuf* b, const char* s)
+{
+	_jb_item(b);
+	if(s == NULL) s = "";
+	if(!_jb_reserve(b, strlen(s) * 6 + 2)) return;
+	b->s[b->len++] = '"';
+	for(const unsigned char* p = (const unsigned char*)s; *p != '\0'; ++p){
+		switch(*p){
+		case '"':  b->s[b->len++] = '\\'; b->s[b->len++] = '"';  break;
+		case '\\': b->s[b->len++] = '\\'; b->s[b->len++] = '\\'; break;
+		case '\n': b->s[b->len++] = '\\'; b->s[b->len++] = 'n';  break;
+		case '\r': b->s[b->len++] = '\\'; b->s[b->len++] = 'r';  break;
+		case '\t': b->s[b->len++] = '\\'; b->s[b->len++] = 't';  break;
+		default:
+			if(*p < 0x20)
+				b->len += (size_t)snprintf(b->s + b->len, 7, "\\u%04x", (unsigned)*p);
+			else
+				b->s[b->len++] = (char)*p;
+		}
+	}
+	b->s[b->len++] = '"';
+	b->s[b->len] = '\0';
+}
+
+static void _jb_key(JBuf* b, const char* k)
+{
+	_jb_str(b, k);
+	_jb_raw(b, ":");
+}
+
+static void _jb_int(JBuf* b, long long n)
+{
+	char sTmp[32];
+	_jb_item(b);
+	snprintf(sTmp, sizeof(sTmp), "%lld", n);
+	_jb_raw(b, sTmp);
+}
+
+/* An int64 as a JSON STRING: JSON numbers are doubles on the far side and
+   lose integers past 2^53, where TT2000 lives.  The caller converts to a
+   BigInt by the type tag beside it. */
+static void _jb_int64str(JBuf* b, long long n)
+{
+	char sTmp[32];
+	snprintf(sTmp, sizeof(sTmp), "%lld", n);
+	_jb_str(b, sTmp);
+}
+
+static void _jb_uint64str(JBuf* b, unsigned long long n)
+{
+	char sTmp[32];
+	snprintf(sTmp, sizeof(sTmp), "%llu", n);
+	_jb_str(b, sTmp);
+}
+
+/* JSON has no NaN or infinity; null is the honest substitute */
+static void _jb_real(JBuf* b, double d)
+{
+	char sTmp[32];
+	_jb_item(b);
+	if(!isfinite(d)){ _jb_raw(b, "null"); return; }
+	snprintf(sTmp, sizeof(sTmp), "%.17g", d);
+	_jb_raw(b, sTmp);
+}
+
+static void _jb_bool(JBuf* b, int bVal)
+{
+	_jb_item(b);
+	_jb_raw(b, bVal ? "true" : "false");
+}
+
+static void _jb_null(JBuf* b)
+{
+	_jb_item(b);
+	_jb_raw(b, "null");
+}
+
+static void _jb_open(JBuf* b, const char* s){ _jb_item(b); _jb_raw(b, s); }
+
+static void _jb_shape(JBuf* b, const ptrdiff_t* pShape, int nRank)
+{
+	_jb_open(b, "[");
+	for(int i = 0; i < nRank; ++i)
+		_jb_int(b, (long long)pShape[i]);
+	_jb_raw(b, "]");
+}
+
+/* The schema's storage token for an element type.  das_vt_toStr already
+   says "das_time"; the two pointer spellings never describe elements, a
+   byte run's elements are ubytes. */
+static const char* _storage_tok(das_val_type vt)
+{
+	if((vt == vtText)||(vt == vtByteSeq)) return "ubyte";
+	const char* s = das_vt_toStr(vt);
+	return (s != NULL) ? s : "";
+}
+
+/* One typed value: {storage, units, value}.  The JS type of value follows
+   storage: integers up to 32 bits and reals are JSON numbers, 64-bit
+   integers are strings (see _jb_int64str), a das_time is ISO 8601. */
+static void _jb_datum(JBuf* b, const ubyte* pVal, das_val_type vt, das_units units)
+{
+	char sTmp[48];
+	_jb_open(b, "{");
+	_jb_key(b, "storage"); _jb_str(b, _storage_tok(vt));
+	_jb_key(b, "units");   _jb_str(b, (units != NULL) ? (const char*)units : "");
+	_jb_key(b, "value");
+	if(pVal == NULL){ _jb_null(b); }
+	else switch(vt){
+	case vtUByte:  _jb_int(b, *((const uint8_t*)pVal));  break;
+	case vtByte:   _jb_int(b, *((const int8_t*)pVal));   break;
+	case vtUShort: _jb_int(b, *((const uint16_t*)pVal)); break;
+	case vtShort:  _jb_int(b, *((const int16_t*)pVal));  break;
+	case vtUInt:   _jb_int(b, *((const uint32_t*)pVal)); break;
+	case vtInt:    _jb_int(b, *((const int32_t*)pVal));  break;
+	case vtULong:  _jb_uint64str(b, *((const uint64_t*)pVal)); break;
+	case vtLong:   _jb_int64str(b, *((const int64_t*)pVal));   break;
+	case vtFloat:  _jb_real(b, *((const float*)pVal));   break;
+	case vtDouble: _jb_real(b, *((const double*)pVal));  break;
+	case vtTime:
+		dt_isoc((const das_time*)pVal, sTmp, sizeof(sTmp), 9);
+		_jb_str(b, sTmp);
+		break;
+	case vtText:   _jb_str(b, (const char*)pVal); break;
+	default:       _jb_null(b); break;
+	}
+	_jb_raw(b, "}");
+}
+
+/* Properties of any descriptor (stream, dataset, dimension, variable) as
+   {name: {type, value, units, alt}}.  Every entry carries all four keys so
+   a reader never tests for a missing one.  Range and array types become
+   JSON arrays; integers are strings for the BigInt rule; datetimes stay
+   the ISO text the producer wrote. */
+static void _jb_props(JBuf* b, const DasDesc* pDesc)
+{
+	_jb_open(b, "{");
+	size_t uProps = DasDesc_length(pDesc);
+	for(size_t u = 0; u < uProps; ++u){
+		const DasProp* pProp = DasDesc_getPropByIdx(pDesc, u);
+		if((pProp == NULL)||(!DasProp_isValid(pProp))) continue;
+
+		ubyte uType = DasProp_type(pProp);
+		ubyte uBase = uType & DASPROP_TYPE_MASK;
+		ubyte uMulti = uType & DASPROP_MULTI_MASK;
+
+		/* A single value is used whole, straight from the property, no copy.
+		   Sets and ranges go through the item splitter; each item can be as
+		   long as the whole value, so size every slot to that */
+		const char* sWhole = DasProp_value(pProp);
+		int nItems = 1;
+		char* pStore = NULL;
+		char** psItems = NULL;
+		const char* const* psVals = &sWhole;
+		if(uMulti != DASPROP_SINGLE){
+			nItems = DasProp_items(pProp);
+			if(nItems < 0) nItems = 0;
+			size_t uLenEa = strlen(sWhole) + 1;
+			pStore = (char*)calloc((size_t)(nItems > 0 ? nItems : 1), uLenEa);
+			psItems = (char**)calloc((size_t)(nItems > 0 ? nItems : 1), sizeof(char*));
+			if((pStore == NULL)||(psItems == NULL)){
+				free(pStore); free(psItems);
+				b->err = das_error(DASERR_DS, "Couldn't allocate property item buffers");
+				return;
+			}
+			for(int i = 0; i < nItems; ++i) psItems[i] = pStore + (size_t)i * uLenEa;
+			int nGot = (nItems > 0) ? DasProp_extractItems(pProp, psItems, (size_t)nItems, uLenEa) : 0;
+			if(nGot < nItems) nItems = (nGot > 0) ? nGot : 0;
+			psVals = (const char* const*)psItems;
+		}
+
+		_jb_key(b, DasProp_name(pProp));
+		_jb_open(b, "{");
+		_jb_key(b, "type");  _jb_str(b, DasProp_typeStr3(pProp));
+		_jb_key(b, "value");
+		if(uMulti != DASPROP_SINGLE) _jb_open(b, "[");
+		for(int i = 0; i < nItems; ++i){
+			switch(uBase){
+			case DASPROP_BOOL:
+				_jb_bool(b, (strcmp(psVals[i], "true") == 0)||(strcmp(psVals[i], "1") == 0));
+				break;
+			case DASPROP_INT:
+				_jb_str(b, psVals[i]);   /* digits as text, BigInt on the far side */
+				break;
+			case DASPROP_REAL:
+				_jb_real(b, strtod(psVals[i], NULL));
+				break;
+			default:  /* string, datetime: as written */
+				_jb_str(b, psVals[i]);
+				break;
+			}
+		}
+		if(uMulti != DASPROP_SINGLE) _jb_raw(b, "]");
+		das_units units = DasProp_units(pProp);
+		_jb_key(b, "units"); _jb_str(b, (units != NULL) ? (const char*)units : "");
+		_jb_key(b, "alt");   _jb_open(b, "{"); _jb_raw(b, "}");
+		_jb_raw(b, "}");
+
+		free(pStore);
+		free(psItems);
+	}
+	_jb_raw(b, "}");
+}
+
+/* Parse one <ops> parameter value by the DASPROP_* type the form reports.
+   sysorder is special-cased as an integer list until das2C reports it that
+   way itself (das2C issue #38); it is the one parameter a plotting client
+   must read, so guessing from the string would be worse than a stopgap. */
+static void _jb_opsParam(JBuf* b, const char* sName, const char* sVal, ubyte uType)
+{
+	ubyte uBase = uType & DASPROP_TYPE_MASK;
+	ubyte uMulti = uType & DASPROP_MULTI_MASK;
+	bool bIntList = (strcmp(sName, "sysorder") == 0)||
+	                ((uBase == DASPROP_INT)&&(uMulti == DASPROP_SET));
+
+	_jb_key(b, sName);
+	if(bIntList){
+		_jb_open(b, "[");
+		const char* p = sVal;
+		while(*p != '\0'){
+			char* pEnd = NULL;
+			long n = strtol(p, &pEnd, 10);
+			if(pEnd == p) break;
+			_jb_int(b, n);
+			p = pEnd;
+			while((*p == ';')||(*p == ' ')) ++p;
+		}
+		_jb_raw(b, "]");
+		return;
+	}
+	switch(uBase){
+	case DASPROP_BOOL: _jb_bool(b, strcmp(sVal, "true") == 0); break;
+	case DASPROP_INT:  _jb_int(b, strtol(sVal, NULL, 10));    break;
+	case DASPROP_REAL: _jb_real(b, strtod(sVal, NULL));       break;
+	default:           _jb_str(b, sVal);                      break;
+	}
+}
+
+/* {kind, ...parameters}.  Only a generic (unrecognized kind) form can
+   enumerate its parameters today, so known kinds are asked by name from a
+   list of every attribute the das2C formalisms define.  Replace the list
+   with DasForm_paramAt() when das2C issue #38 lands. */
+static void _jb_ops(JBuf* b, const DasForm* pForm)
+{
+	static const char* asKnown[] = {
+		"frame", "system", "sysorder", "from", "to", "body", "surface",
+		"fixed", "symmetry", NULL
+	};
+	_jb_open(b, "{");
+	_jb_key(b, "kind"); _jb_str(b, DasForm_kindStr(pForm));
+
+	const char* sName = NULL;
+	const char* sVal = NULL;
+	for(int i = 0; DasFormGeneric_paramAt(pForm, i, &sName, &sVal); ++i)
+		if((sName != NULL)&&(sVal != NULL)&&(strcmp(sName, "kind") != 0))
+			_jb_opsParam(b, sName, sVal, DASPROP_STRING | DASPROP_SINGLE);
+
+	if(!DasForm_isKind(pForm, DAS_FORM_EXT)){
+		for(int i = 0; asKnown[i] != NULL; ++i){
+			ubyte uType = DASPROP_STRING | DASPROP_SINGLE;
+			sVal = DasForm_getParam(pForm, asKnown[i], &uType);
+			if(sVal != NULL)
+				_jb_opsParam(b, asKnown[i], sVal, uType);
+		}
+	}
+	_jb_raw(b, "}");
+}
+
+/* {kind} plus, for a sequence, the intercept and slopes as typed values.
+   A das_time sequence keeps its slopes as doubles in seconds (das2C's
+   affine rule), so their storage and units differ from the intercept's. */
+static void _jb_source(JBuf* b, const DasVar* pVar, const ptrdiff_t* pShape, int nRank)
+{
+	const DasGen* pGen = DasVar_gen(pVar);
+	_jb_open(b, "{");
+	_jb_key(b, "kind");
+
+	/* The one variable class with no leaf value source is an operation over
+	   two other variables (das2 streams build time = reference + offset this
+	   way).  Say what was combined, by role, so a caller can find the
+	   operands in the same dimension. */
+	if(pGen == NULL){
+		const DasVarBin* pBin = (const DasVarBin*)pVar;
+		const char* sOp = das_op_toStr(pBin->op, NULL);
+		_jb_str(b, "binaryOp");
+		_jb_key(b, "op");    _jb_str(b, (sOp != NULL) ? sOp : "");
+		_jb_key(b, "left");  _jb_str(b, (pBin->pLeft != NULL) ? DasVar_role(pBin->pLeft) : "");
+		_jb_key(b, "right"); _jb_str(b, (pBin->pRight != NULL) ? DasVar_role(pBin->pRight) : "");
+		_jb_raw(b, "}");
+		return;
+	}
+
+	switch(DasGen_type(pGen)){
+	case gtArray: _jb_str(b, "array");    break;
+	case gtSeq:   _jb_str(b, "sequence"); break;
+	case gtConst: _jb_str(b, "const");    break;
+	case gtUnop:  _jb_str(b, "unaryOp");  break;
+	case gtBinop: _jb_str(b, "binaryOp"); break;
+	default:      _jb_str(b, "");         break;
+	}
+
+	if(DasGen_type(pGen) == gtSeq){
+		const DasGenSeq* pSeq = (const DasGenSeq*)pGen;
+		das_val_type vt = (das_val_type)DasGen_elemType(pGen);
+		das_units units = DasVar_units(pVar);
+		das_val_type vtSlope = (vt == vtTime) ? vtDouble : vt;
+		das_units uSlope = (vt == vtTime) ? UNIT_SECONDS : units;
+		int nComps = (pSeq->nComps > 0) ? pSeq->nComps : 1;
+
+		_jb_key(b, "minval");
+		if(nComps > 1) _jb_open(b, "[");
+		for(int c = 0; c < nComps; ++c)
+			_jb_datum(b, DasGenSeq_intercept(pSeq, c), vt, units);
+		if(nComps > 1) _jb_raw(b, "]");
+
+		/* one slot per dataset index, null where the sequence does not run */
+		_jb_key(b, "interval");
+		if(nComps > 1) _jb_open(b, "[");
+		for(int c = 0; c < nComps; ++c){
+			_jb_open(b, "[");
+			for(int i = 0; i < nRank; ++i){
+				if(pShape[i] == VARIDX_UNUSED) _jb_null(b);
+				else _jb_datum(b, DasGenSeq_interval(pSeq, c, i), vtSlope, uSlope);
+			}
+			_jb_raw(b, "]");
+		}
+		if(nComps > 1) _jb_raw(b, "]");
+	}
+	_jb_raw(b, "}");
+}
+
+static void _jb_var(JBuf* b, DasVar* pVar, int nDsRank)
+{
+	das_val_type vt = DasVar_valType(pVar);
+	das_val_type et = (das_val_type)DasVar_elemType(pVar);
+	das_units units = DasVar_units(pVar);
+	bool bBytes = (vt == vtText)||(vt == vtByteSeq);
+
+	ptrdiff_t aShape[VARIDX_MAX] = VARIDX_INIT_UNUSED;
+	DasVar_shape(pVar, aShape);
+	ptrdiff_t aInner[VARIDX_MAX] = {0};
+	int nInner = DasVar_intrShape(pVar, aInner);
+	if(nInner < 0) nInner = 0;
+
+	_jb_open(b, "{");
+	_jb_key(b, "ptr");      _jb_int(b, (long long)(uintptr_t)pVar);
+	_jb_key(b, "role");     _jb_str(b, DasVar_role(pVar));
+	_jb_key(b, "units");    _jb_str(b, (units != NULL) ? (const char*)units : "");
+
+	/* semantic is derived the way the das3 writer derives it: spent at parse
+	   time, re-stated for the reader.  A byte run's meaning is its class. */
+	_jb_key(b, "semantic");
+	if(vt == vtText) _jb_str(b, "string");
+	else if(vt == vtByteSeq) _jb_str(b, "blob");
+	else{
+		const char* sSem = das_sem_default(et, units);
+		_jb_str(b, (sSem != NULL) ? sSem : "");
+	}
+	_jb_key(b, "storage");  _jb_str(b, _storage_tok(bBytes ? vt : et));
+	_jb_key(b, "innerShape"); _jb_shape(b, aInner, nInner);
+	_jb_key(b, "isNumeric"); _jb_bool(b, DasVar_isNumeric(pVar));
+	_jb_key(b, "props");    _jb_props(b, (const DasDesc*)pVar);
+	_jb_key(b, "source");   _jb_source(b, pVar, aShape, nDsRank);
+
+	/* a byte run has no formalism by class, so no ops key at all */
+	const DasForm* pForm = DasVar_form(pVar);
+	if(pForm != NULL){
+		_jb_key(b, "ops");  _jb_ops(b, pForm);
+	}
+
+	/* component symbols in storage order, null where the kind has none */
+	_jb_key(b, "symbols"); _jb_open(b, "[");
+	if(!bBytes && (nInner > 0)){
+		long long nSyms = 1;
+		for(int i = 0; i < nInner; ++i)
+			nSyms = (aInner[i] > 0) ? nSyms * aInner[i] : 0;
+		for(long long i = 0; i < nSyms; ++i){
+			const char* sSym = DasVar_compSym(pVar, (int)i);
+			if(sSym != NULL) _jb_str(b, sSym); else _jb_null(b);
+		}
+	}
+	_jb_raw(b, "]");
+	_jb_raw(b, "}");
+}
+
+static void _jb_dim(JBuf* b, DasDim* pDim, int nDsRank)
+{
+	_jb_open(b, "{");
+	_jb_key(b, "ptr");     _jb_int(b, (long long)(uintptr_t)pDim);
+	_jb_key(b, "name");    _jb_str(b, DasDim_id(pDim));
+	_jb_key(b, "physDim"); _jb_str(b, DasDim_dim(pDim));
+	_jb_key(b, "axes");    _jb_open(b, "[");
+	for(int i = 0; i < DASDIM_NAXES; ++i){
+		const char* sAxis = DasDim_getAxis(pDim, i);
+		if(sAxis == NULL) break;
+		_jb_str(b, sAxis);
+	}
+	_jb_raw(b, "]");
+	_jb_key(b, "kind");    _jb_str(b, DasDim_typeName(pDim));
+	_jb_key(b, "props");   _jb_props(b, (const DasDesc*)pDim);
+	_jb_key(b, "vars");    _jb_open(b, "{");
+	size_t uVars = DasDim_numVars(pDim);
+	for(size_t u = 0; u < uVars; ++u){
+		_jb_key(b, DasDim_getRoleByIdx(pDim, u));
+		_jb_var(b, DasDim_getVarByIdx(pDim, u), nDsRank);
+	}
+	_jb_raw(b, "}");
+	_jb_raw(b, "}");
+}
+
+static void _jb_dims(JBuf* b, DasDs* pDs, enum dim_type dt, int nDsRank)
+{
+	_jb_open(b, "[");
+	size_t uDims = DasDs_numDims(pDs, dt);
+	for(size_t u = 0; u < uDims; ++u)
+		_jb_dim(b, DasDs_getDimByIdx(pDs, u, dt), nDsRank);
+	_jb_raw(b, "]");
+}
+
+char* daswasm_ds_json(DasDs* pDs)
+{
+	JBuf b = {NULL, 0, 0, 0};
+	ptrdiff_t aShape[VARIDX_MAX] = VARIDX_INIT_UNUSED;
+	int nRank = DasDs_shape(pDs, aShape);
+	const char* sGroup = DasDs_group(pDs);
+
+	_jb_open(&b, "{");
+	_jb_key(&b, "ptr");    _jb_int(&b, (long long)(uintptr_t)pDs);
+	_jb_key(&b, "name");   _jb_str(&b, DasDs_id(pDs));
+	_jb_key(&b, "group");  _jb_str(&b, (sGroup != NULL) ? sGroup : "");
+	_jb_key(&b, "rank");   _jb_int(&b, nRank);
+	_jb_key(&b, "shape");  _jb_shape(&b, aShape, nRank);
+	_jb_key(&b, "props");  _jb_props(&b, (const DasDesc*)pDs);
+	_jb_key(&b, "coords"); _jb_dims(&b, pDs, DASDIM_COORD, nRank);
+	_jb_key(&b, "data");   _jb_dims(&b, pDs, DASDIM_DATA, nRank);
+	_jb_raw(&b, "}");
+
+	if(b.err){ free(b.s); return NULL; }
+	return b.s;
+}
+
+char* daswasm_desc_json(const DasDesc* pDesc)
+{
+	JBuf b = {NULL, 0, 0, 0};
+	_jb_props(&b, pDesc);
+	if(b.err){ free(b.s); return NULL; }
+	return b.s;
 }

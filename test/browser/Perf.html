@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>das2js performance</title>
+<style>
+	body { font-family: sans-serif; margin: 1em 2em; }
+	input[type=text] { width: 44em; }
+	input[type=number] { width: 4em; }
+	#status { color: #555; margin: 0.5em 0; }
+	table { border-collapse: collapse; margin-top: 1em; }
+	th, td { border: 1px solid #ccc; padding: 0.3em 0.7em; text-align: right; font-variant-numeric: tabular-nums; }
+	th { background: #f4f4f4; }
+	td:first-child, th:first-child { text-align: left; }
+	#datasets { color: #555; font-size: 90%; }
+	.err { color: #a00; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>das2js performance</h1>
+<p>Fetch a real stream, then re-parse the same bytes from memory to separate
+the parser from the network.  Times are wall-clock milliseconds.</p>
+<form id="form">
+	<input type="text" id="url" placeholder="stream URL">
+	re-parse <input type="number" id="reps" value="3" min="0" max="20"> times
+	<button type="submit">Run</button>
+</form>
+<p id="status"></p>
+<p id="datasets"></p>
+<table id="results">
+	<thead><tr>
+		<th>run</th><th>bytes</th><th>chunks</th><th>wall ms</th>
+		<th>first header ms</th><th>first record ms</th>
+		<th>parse ms</th><th>MB/s</th><th>records</th><th>records/s</th>
+		<th>view all vars ms</th><th>heap MB</th>
+	</tr></thead>
+	<tbody></tbody>
+</table>
+<pre id="err" class="err"></pre>
+<script type="module" src="./Perf.mjs"></script>
+</body>
+</html>

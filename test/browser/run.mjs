@@ -16,6 +16,7 @@
  * before it can report anything.
  *
  * Usage: node test/browser/run.mjs [page.html] [--keep] [--dasflex=DIR] [--serve]
+ *        [--timeout=SECONDS]
  *   page defaults to TestModule.html, --keep leaves the profile dir behind.
  *   --dasflex starts test/dasflex_cgi.py over the dasFlex build tree in DIR
  *   (default ../dasflex) and tells the page about it with
@@ -55,7 +56,9 @@ const MIME = {
 	'.json': 'application/json',
 };
 
-const TIMEOUT_MS = 90000;
+/* --timeout=N (seconds) for pages that pull hundreds of megabytes */
+const timeoutArg = process.argv.slice(2).find(a => a.startsWith('--timeout='));
+const TIMEOUT_MS = timeoutArg ? Number(timeoutArg.split('=')[1]) * 1000 : 90000;
 
 /* 9099: not in /etc/services, and the local convention here is that ports
  * ending in 99 are personal test servers */

@@ -91,28 +91,28 @@ async function main()
 	check(strm.length > 0, 'live stream has no datasets');
 	for(const ds of strm.datasets()){
 		const shape = ds.shape;
-		log(`INFO: dataset ${ds.id} shape [${shape}] coords ${ds.coords.map(c => c.id)} data ${ds.data.map(c => c.id)}`);
-		check(shape[0] >= SRV.minRecs, `${ds.id}: too few records (${shape[0]}) for the span`);
+		log(`INFO: dataset ${ds.name} shape [${shape}] coords ${ds.coords.map(c => c.name)} data ${ds.data.map(c => c.name)}`);
+		check(shape[0] >= SRV.minRecs, `${ds.name}: too few records (${shape[0]}) for the span`);
 
 		/* A das2 spectrogram up-converted to das3: time and frequency
 		 * coordinates, one data dimension, all numeric.  Note the id: das2
 		 * up-conversion names the x axis 'Time', native das3 streams say
 		 * 'time'; a tolerant lookup is what a UI needs too. */
-		const time = ds.coords.find(c => c.id.toLowerCase() === 'time');
-		check(time !== undefined, `${ds.id}: no time coordinate`);
+		const time = ds.coords.find(c => c.name.toLowerCase() === 'time');
+		check(time !== undefined, `${ds.name}: no time coordinate`);
 		if(time){
 			const t = time.var('center').values({shapeFrom: ds.shapeDonor(time.var('center'))});
-			check(t.length === shape[0], `${ds.id}: time count ${t.length} != records ${shape[0]}`);
+			check(t.length === shape[0], `${ds.name}: time count ${t.length} != records ${shape[0]}`);
 			/* das2 text streams carry das_time, converted here to seconds since
 			 * 1958; the expected year is a property of the chosen server */
-			check(t[0] > SRV.year[0] && t[0] < SRV.year[1], `${ds.id}: first time ${t[0]} outside expected year`);
-			check(t[t.length - 1] > t[0], `${ds.id}: time not increasing`);
+			check(t[0] > SRV.year[0] && t[0] < SRV.year[1], `${ds.name}: first time ${t[0]} outside expected year`);
+			check(t[t.length - 1] > t[0], `${ds.name}: time not increasing`);
 		}
 		for(const dim of ds.data){
 			const v = dim.var('center');
 			const vals = v.values({shapeFrom: ds.shapeDonor(v)});
-			check(vals.length > 0, `${ds.id}/${dim.id}: no values`);
-			log(`INFO: ${ds.id}/${dim.id} ${v.valType}[${vals.length}] units '${v.units}' first ${vals[0]}`);
+			check(vals.length > 0, `${ds.name}/${dim.name}: no values`);
+			log(`INFO: ${ds.name}/${dim.name} ${v.storage}[${vals.length}] units '${v.units}' first ${vals[0]}`);
 		}
 	}
 	/* Growth between chunks depends on how the network stack slices the

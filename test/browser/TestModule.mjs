@@ -56,60 +56,125 @@ const FIXTURES = [
 	'/das2C/examples/ex09_juno_waves_survey.d2t',
 ];
 
+const SEMANTICS = new Set(['bool', 'datetime', 'integer', 'real', 'string', 'blob']);
+const SOURCE_KINDS = new Set(['array', 'sequence', 'const', 'unaryOp', 'binaryOp']);
+const PROP_TYPES = new Set(['bool', 'boolArray', 'datetime', 'datetimeRange',
+	'datetimeArray', 'integer', 'integerRange', 'integerArray', 'real', 'realRange',
+	'realArray', 'string', 'stringArray']);
+
+/* Every property entry has the same four fields; only value's JS type
+ * changes, picked by type */
+function checkProps(props, tag)
+{
+	check(Object.getPrototypeOf(props) === Object.prototype, `${tag}: props is not a plain object`);
+	for(const [k, e] of Object.entries(props)){
+		check(k !== '', `${tag}: property with empty name`);
+		check(PROP_TYPES.has(e.type), `${tag}: property ${k} has type '${e.type}'`);
+		check(typeof e.units === 'string', `${tag}: property ${k} units not a string`);
+		check(e.alt !== null && typeof e.alt === 'object', `${tag}: property ${k} alt not an object`);
+		const base = e.type.replace(/Range|Array$/, '');
+		const multi = (base !== e.type);
+		check(multi === Array.isArray(e.value), `${tag}: property ${k} value container wrong for ${e.type}`);
+		if(e.type.endsWith('Range'))
+			check(e.value.length === 2, `${tag}: range property ${k} has ${e.value.length} entries`);
+		const want = {bool: 'boolean', datetime: 'string', integer: 'bigint', real: 'number', string: 'string'}[base];
+		for(const v of (multi ? e.value : [e.value]))
+			check(typeof v === want || (base === 'real' && v === null), `${tag}: property ${k} value is ${typeof v}, want ${want}`);
+	}
+}
+
 function walkStream(d, strm, name)
 {
 	const nDs = strm.length;
 	if(!check(nDs > 0, `${name}: stream has no datasets`)) return;
 
 	for(const ds of strm.datasets()){
-		check(ds.id !== '', `${name}: dataset without an id`);
+		check(ds.name !== '', `${name}: dataset without a name`);
+		check(strm.dataset(0) === ds || ds !== strm.dataset(0), `${name}: dataset handle identity`);
 		const shape = ds.shape;
+		check(shape.length === ds.rank, `${name}: shape length is not the rank`);
 		check(shape.length >= 1, `${name}: dataset with no bulk indices`);
 		check(shape[0] >= 0, `${name}: negative record count`);
 		const empty = (shape[0] === 0);
-		if(empty) log(`INFO: ${name}: dataset '${ds.id}' has a header but no records`);
+		if(empty) log(`INFO: ${name}: dataset '${ds.name}' has a header but no records`);
+		checkProps(ds.props, `${name} ${ds.name}`);
 
 		const dims = ds.coords.concat(ds.data);
 		check(dims.length > 0, `${name}: dataset with no dimensions`);
+		check(ds.coords === ds.coords, `${name}: coords not stable between reads`);
 
 		for(const dim of dims){
-			check(dim.id !== '', `${name}: dimension without an id`);
-			const vars = dim.vars;
-			check(vars.size > 0, `${name}: dimension ${dim.id} has no variables`);
+			check(dim.name !== '', `${name}: dimension without a name`);
+			check(dim.physDim !== '', `${name}: dimension ${dim.name} without a physDim`);
+			check(dim.kind === (ds.coords.includes(dim) ? 'coord' : 'data'), `${name}: ${dim.name} kind mismatch`);
+			check(Array.isArray(dim.axes), `${name}: ${dim.name} axes not an array`);
+			check(ds.dim(dim.name) === dim, `${name}: dim(${dim.name}) lookup failed`);
+			checkProps(dim.props, `${name} ${ds.name}/${dim.name}`);
+			const vars = Object.entries(dim.vars);
+			check(vars.length > 0, `${name}: dimension ${dim.name} has no variables`);
 
 			for(const [role, v] of vars){
-				const tag = `${name} ${ds.id}/${dim.id}:${role}`;
-				check(role !== '', `${tag}: empty role`);
-				check(v.valType !== '', `${tag}: no value type`);
+				const tag = `${name} ${ds.name}/${dim.name}:${role}`;
+				check(role !== '' && v.role === role, `${tag}: role mismatch`);
+				check(dim.var(role) === v, `${tag}: var(role) lookup failed`);
+				check(SEMANTICS.has(v.semantic), `${tag}: semantic '${v.semantic}' out of vocabulary`);
+				check(v.storage !== '', `${tag}: no storage type`);
+				check(SOURCE_KINDS.has(v.source.kind), `${tag}: source kind '${v.source.kind}' out of vocabulary`);
+				check(Array.isArray(v.innerShape), `${tag}: innerShape not an array`);
+				checkProps(v.props, tag);
 
-				for(const ext of v.shape(ds.rank))
+				const isBytes = (v.semantic === 'string' || v.semantic === 'blob');
+				check(isBytes === (v.ops === undefined), `${tag}: ops present=${v.ops !== undefined} for semantic ${v.semantic}`);
+				if(!isBytes) check(typeof v.ops.kind === 'string' && v.ops.kind !== '', `${tag}: ops without a kind`);
+
+				/* symbols are per element of one value, in storage order */
+				const nInner = isBytes ? 0 : v.innerShape.reduce((a, b) => a * b, 1);
+				check(v.symbols.length === (nInner > 0 && v.innerShape.length > 0 ? nInner : 0),
+					`${tag}: ${v.symbols.length} symbols for inner shape [${v.innerShape}]`);
+
+				if(v.source.kind === 'sequence'){
+					const g = v.source;
+					const mins = Array.isArray(g.minval) ? g.minval : [g.minval];
+					for(const dm of mins)
+						check(typeof dm.storage === 'string' && 'units' in dm && 'value' in dm, `${tag}: sequence minval not a typed value`);
+					const rows = Array.isArray(g.interval[0]) ? g.interval : [g.interval];
+					for(const row of rows){
+						check(row.length === ds.rank, `${tag}: interval has ${row.length} slots for rank ${ds.rank}`);
+						check(row.some(x => x !== null), `${tag}: sequence runs along no index`);
+					}
+				}
+
+				const vshape = v.shape;
+				check(vshape.length === ds.rank, `${tag}: var shape length is not the rank`);
+				for(const ext of vshape)
 					check(ext >= 0 || ext === d.RAGGED || ext === d.BORROW || ext === d.UNUSED,
 						`${tag}: shape entry ${ext} out of contract`);
 
-				/* ubyte* (opaque blobs) is the one type values() refuses */
-				if(v.valType === 'ubyte*') continue;
+				/* blobs are the one semantic values() refuses */
+				if(v.semantic === 'blob') continue;
 
+				const isArray = (v.source.kind === 'array');
 				const donor = ds.shapeDonor(v);
 				if(empty){
 					/* values() must answer with an empty container, not throw,
 					 * for anything that varies along records.  A variable that
 					 * does not (a das2 frequency table, UNUSED along index 0)
 					 * is fully present with zero records; that is correct. */
-					if(v.isArrayBacked && v.shape(ds.rank)[0] !== d.UNUSED)
+					if(isArray && vshape[0] !== d.UNUSED)
 						check(v.values().length === 0, `${tag}: empty dataset gave values`);
 					continue;
 				}
 				const vals = v.values({shapeFrom: donor});
 				check(vals.length > 0, `${tag}: no values`);
 
-				if(v.valType === 'char*'){
+				if(v.semantic === 'string'){
 					check(Array.isArray(vals), `${tag}: text did not come back as an Array`);
 					/* nested to the variable's shape: descend to the first leaf */
 					let leaf = vals;
 					while(Array.isArray(leaf)) leaf = leaf[0];
 					check(typeof leaf === 'string' && leaf.length > 0, `${tag}: first string missing`);
 				}
-				else if(v.valType === 'das_time'){
+				else if(v.storage === 'das_time'){
 					check(vals instanceof Float64Array, `${tag}: das_time not Float64Array`);
 					/* seconds since 1958: 0 (1958) to ~4.5e9 (2100) */
 					check(vals[0] > 0 && vals[0] < 4.5e9, `${tag}: time ${vals[0]} implausible`);
@@ -119,7 +184,7 @@ function walkStream(d, strm, name)
 
 					/* The zero-copy promise: for array-backed variables the view
 					 * must sit inside the wasm heap, not in a fresh buffer */
-					if(v.isArrayBacked)
+					if(isArray)
 						check(vals.buffer === d._m().HEAPU8.buffer, `${tag}: view is not over the heap`);
 
 					/* and the copy option must give an independent buffer with
@@ -132,12 +197,12 @@ function walkStream(d, strm, name)
 					check(same, `${tag}: copy contents differ`);
 
 					/* per-record sub-arrays must tile the flat view exactly */
-					if(v.isArrayBacked){
-						const nRecs = v.lengthAt([]);
-						check(nRecs === v.arrayShape[0], `${tag}: lengthAt([]) is not the record count`);
+					if(isArray){
+						const nRecs = v.lengthIn([]);
+						check(nRecs === v.arrayShape[0], `${tag}: lengthIn([]) is not the record count`);
 						let total = 0;
 						for(let i = 0; i < nRecs; ++i){
-							const rec = v.valuesAt([i]);
+							const rec = v.valuesIn([i]);
 							if(rec.length > 0)
 								check(rec.byteOffset === vals.byteOffset + total * vals.BYTES_PER_ELEMENT,
 									`${tag}: record ${i} not contiguous with predecessor`);
@@ -170,10 +235,41 @@ async function main()
 		check(nChunks > 0, `${url}: onChunk never called`);
 		walkStream(d, strm, url);
 
-		const props = strm.props;
-		for(const [k, v] of props)
-			check(k !== '' && typeof v.value === 'string' && v.type !== '',
-				`${url}: property ${k} has empty parts`);
+		checkProps(strm.props, `${url} stream`);
+
+		/* the printable form: stringify must not throw on BigInts, must not
+		 * leak heap pointers, and must carry the live shape */
+		{
+			let text = '';
+			try{ text = JSON.stringify(strm); }
+			catch(e){ check(false, `${url}: JSON.stringify(stream) threw ${e.message}`); }
+			const o = text ? JSON.parse(text) : {datasets: []};
+			check(o.datasets.length === strm.length, `${url}: toJSON dataset count`);
+			check(!text.includes('"ptr"'), `${url}: toJSON leaks pointers`);
+			if(o.datasets.length > 0)
+				check(o.datasets[0].shape[0] === strm.dataset(0).shape[0], `${url}: toJSON shape not live`);
+		}
+		strm.free();
+	}
+
+	/* The snapshot's structural keys on a known fixture: ex17 is a cartesian
+	 * 3-vector with its sysorder declared, a TT2000 time axis with a point
+	 * formalism, and a das2-style group-less dataset */
+	{
+		const strm = await d.fetchStream(FIXTURES[0]);
+		const ds = strm.dataset(0);
+		check(ds.name === 'BDC_ROI' && ds.group === '', `ex17: name/group ${ds.name}/${ds.group}`);
+		const t = ds.dim('time').var();
+		check(t.semantic === 'datetime' && t.storage === 'long' && t.units === 'TT2000',
+			`ex17: time is ${t.semantic}/${t.storage}/${t.units}`);
+		check(t.ops.kind === 'point', `ex17: time ops kind ${t.ops.kind}`);
+		check(t.values() instanceof BigInt64Array, 'ex17: TT2000 values not BigInt64Array');
+		const b = ds.dim('b_tscs').var();
+		check(b.ops.kind === 'vector' && b.ops.system === 'cartesian', `ex17: vector ops ${JSON.stringify(b.ops)}`);
+		check(Array.isArray(b.ops.sysorder) && b.ops.sysorder.join() === '0,1,2', 'ex17: sysorder not parsed to ints');
+		check(b.innerShape.join() === '3' && b.symbols.join() === 'x,y,z', `ex17: inner [${b.innerShape}] syms [${b.symbols}]`);
+		const lbl = ds.dim('b_tscs').props.label;
+		check(lbl.type === 'string' && typeof lbl.value === 'string' && lbl.units === '' && Object.keys(lbl.alt).length === 0, 'ex17: label property');
 		strm.free();
 	}
 

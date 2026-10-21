@@ -43,7 +43,7 @@ import createDas3Module from './das2c.mjs';
 /* Value type mapping
  *
  * The C side names element types with das2C's own vocabulary; see
- * daswasm_var_valType() in glue/wasm.h.  Each numeric one has exactly one
+ * DasVar.storage (das_vt_toStr names in glue/wasm.h).  Each numeric one has exactly one
  * TypedArray flavor.  "das_time" is a broken-down calendar struct, "char*"
  * and "ubyte*" are internal pointers to variable length items; none of those
  * three can be viewed directly and DasVar.values() handles them separately. */
@@ -131,31 +131,13 @@ export class DasRuntime {
 
 			strmDsCount:   w('daswasm_strm_dsCount', N, [N]),
 			strmDsAt:      w('daswasm_strm_dsAt', N, [N, N]),
-			propCount:     w('daswasm_desc_propCount', N, [N]),
-			propName:      w('daswasm_desc_propName', S, [N, N]),
-			propValue:     w('daswasm_desc_propValue', S, [N, N]),
-			propType:      w('daswasm_desc_propType', S, [N, N]),
+			descJson:      w('daswasm_desc_json', N, [N]),
+			dsJson:        w('daswasm_ds_json', N, [N]),
 
-			dsId:          w('daswasm_ds_id', S, [N]),
-			dsGroup:       w('daswasm_ds_group', S, [N]),
-			dsRank:        w('daswasm_ds_rank', N, [N]),
+			/* the live quantities: everything else about a dataset's structure
+			 * is fixed at header time and comes from the JSON snapshot */
 			dsShapeAt:     w('daswasm_ds_shapeAt', N, [N, N]),
-			dsDimCount:    w('daswasm_ds_dimCount', N, [N, N]),
-			dsDimAt:       w('daswasm_ds_dimAt', N, [N, N, N]),
-
-			dimId:         w('daswasm_dim_id', S, [N]),
-			dimIsCoord:    w('daswasm_dim_isCoord', N, [N]),
-			dimVarCount:   w('daswasm_dim_varCount', N, [N]),
-			dimVarAt:      w('daswasm_dim_varAt', N, [N, N]),
-			dimRoleAt:     w('daswasm_dim_roleAt', S, [N, N]),
-
-			varUnits:      w('daswasm_var_units', S, [N]),
-			varValType:    w('daswasm_var_valType', S, [N]),
 			varShapeAt:    w('daswasm_var_shapeAt', N, [N, N]),
-			varIntrRank:   w('daswasm_var_intrRank', N, [N]),
-			varIntrShapeAt:w('daswasm_var_intrShapeAt', N, [N, N]),
-			varCompSym:    w('daswasm_var_compSym', S, [N, N]),
-			varIsNumeric:  w('daswasm_var_isNumeric', N, [N]),
 			varAry:        w('daswasm_var_ary', N, [N]),
 			varQube:       w('daswasm_var_qubeLike', N, [N, N]),
 
@@ -420,26 +402,92 @@ export class DasReader {
 /* ************************************************************************ */
 /* The dataset model: DasStream -> DasDataset -> DasDim -> DasVar.
  *
- * Each of these is a thin handle around a C pointer.  They do not copy any
- * metadata at construction; every getter is a C call.  That keeps them
- * cheap to create (walking a stream mid-download creates many) and always
- * current (a dataset's record count changes as packets arrive). */
+ * A dataset's structure is fixed the moment its header packet is parsed;
+ * only the record count grows afterwards.  So the structure is read ONCE,
+ * as a JSON document from glue/wasm.c (daswasm_ds_json), parsed into plain
+ * objects, and the handle classes below are thin views over that snapshot
+ * plus the C pointer for the few things that are live: record counts and
+ * value buffers.  Walking a stream mid-download therefore costs one C call
+ * per dataset, not one per field.
+ *
+ * Key spellings follow the das3 stream XML (name, group, physDim, axis,
+ * role, semantic, storage) so what you see in a header is what you type.
+ * Every snapshot field is a string, number, boolean or array; nothing in
+ * the snapshot is consulted per value. */
 
-/* Property access is shared by streams, datasets and dimensions, which are
- * all DasDesc descriptors in C.  A mixin keeps it in one place. */
-function readProps(c, p)
+/* Read a NUL terminated UTF-8 string the C side malloc'd, free it, and
+ * parse it.  cwrap's 'string' return type would decode for us but then the
+ * pointer is gone and the buffer leaks, hence 'number' and this. */
+function takeJson(d, p)
 {
-	const n = c.propCount(p);
-	const props = new Map();
-	for(let i = 0; i < n; ++i)
-		props.set(c.propName(p, i), {value: c.propValue(p, i), type: c.propType(p, i)});
+	if(p === 0) throw new DasError('snapshot failed: ' + d.lastError());
+	const m = d._m();
+	const end = m.HEAPU8.indexOf(0, p);
+	let text;
+	try{ text = UTF8.decode(m.HEAPU8.subarray(p, end)); }
+	finally{ d._c().free(p); }
+	return JSON.parse(text);
+}
+
+/* JSON numbers are doubles and lose integers past 2^53, where a TT2000
+ * time stamp lives.  So the C side writes 64-bit integers as digit strings
+ * and these two helpers turn them into BigInts by the type tag beside
+ * them.  Integer-typed properties are always BigInt, never Number, so that
+ * a property holding a time stamp is exact; Number(x) when you need to mix. */
+function reviveProps(props)
+{
+	for(const entry of Object.values(props)){
+		if(!entry.type.startsWith('integer')) continue;
+		entry.value = Array.isArray(entry.value)
+			? entry.value.map(BigInt) : BigInt(entry.value);
+	}
 	return props;
+}
+
+function reviveDatum(dm)
+{
+	if(dm !== null && (dm.storage === 'long' || dm.storage === 'ulong') && dm.value !== null)
+		dm.value = BigInt(dm.value);
+	return dm;
+}
+
+function reviveVar(v)
+{
+	reviveProps(v.props);
+	const g = v.source;
+	if(g.kind === 'sequence'){
+		if(Array.isArray(g.minval)) g.minval.forEach(reviveDatum);
+		else reviveDatum(g.minval);
+		/* interval is [per index] for a scalar sequence, [per component]
+		 * [per index] for a composite one */
+		for(const row of (Array.isArray(g.interval[0]) ? g.interval : [g.interval]))
+			row.forEach(reviveDatum);
+	}
+	return v;
+}
+
+
+/* A deep copy with every BigInt turned into a decimal string, for
+ * JSON.stringify, which refuses BigInts outright.  toJSON() below returns
+ * such copies so `JSON.stringify(stream, null, 2)` prints a whole stream's
+ * structure with no replacer; the live objects keep their BigInts. */
+function plain(o)
+{
+	if(typeof o === 'bigint') return o.toString();
+	if(Array.isArray(o)) return o.map(plain);
+	if(o !== null && typeof o === 'object'){
+		const out = {};
+		for(const [k, v] of Object.entries(o)) out[k] = plain(v);
+		return out;
+	}
+	return o;
 }
 
 /** A das stream: global properties and a list of datasets.  Wraps a das2C
  * DasStream. */
 export class DasStream {
 	#d; #p; #owned;
+	#dsCache = new Map();   /* pointer -> DasDataset, so snapshots are read once */
 
 	constructor(das3, p, owned)
 	{
@@ -447,18 +495,29 @@ export class DasStream {
 	}
 	_p(){ return this.#p; }
 
-	/** DasStream-level properties as a Map of name -> {value, type} */
-	get props(){ return readProps(this.#d._c(), this.#p); }
+	/** Stream-level properties as {name: {type, value, units, alt}}, see
+	 * DasDataset.props.  Read from C on each access (a stream's properties
+	 * are complete once its header has arrived, but this is cheap). */
+	get props()
+	{
+		return reviveProps(takeJson(this.#d, this.#d._c().descJson(this.#p)));
+	}
 
 	/** Number of datasets so far */
 	get length(){ return this.#d._c().strmDsCount(this.#p); }
 
-	/** The i-th dataset */
+	/** The i-th dataset.  The same DasDataset object is returned for the
+	 * same dataset every time, so its snapshot is read once per stream. */
 	dataset(i)
 	{
 		const p = this.#d._c().strmDsAt(this.#p, i);
 		if(p === 0) throw new RangeError(`no dataset ${i}`);
-		return new DasDataset(this.#d, p);
+		let ds = this.#dsCache.get(p);
+		if(ds === undefined){
+			ds = new DasDataset(this.#d, p);
+			this.#dsCache.set(p, ds);
+		}
+		return ds;
 	}
 
 	/** All datasets, so `for(const ds of stream.datasets())` works */
@@ -468,6 +527,15 @@ export class DasStream {
 		for(let i = 0; i < n; ++i) yield this.dataset(i);
 	}
 
+	/** The structure of the whole stream as plain data: its properties and
+	 * every dataset's toJSON().  Lets `JSON.stringify(stream, null, 2)`
+	 * answer "what do I have to work with" without printing a single data
+	 * value. */
+	toJSON()
+	{
+		return {props: plain(this.props), datasets: Array.from(this.datasets(), ds => ds.toJSON())};
+	}
+
 	/** Release the C side.  Only valid for streams taken from a reader;
 	 * streams still owned by a DasReader are freed with it. */
 	free()
@@ -475,6 +543,7 @@ export class DasStream {
 		if(this.#p === 0) return;
 		if(this.#owned) this.#d._c().streamFree(this.#p);
 		this.#p = 0;
+		this.#dsCache.clear();
 	}
 }
 
@@ -491,57 +560,86 @@ export class DasStream {
  * count or DasRuntime.RAGGED (varies with earlier indices).  A single variable's
  * shape may also say DasRuntime.UNUSED (the variable does not vary along it) or
  * DasRuntime.BORROW (no extent of its own, as many values as the dataset has
- * there; typical of a sequence paired with ragged data). */
+ * there; typical of a sequence paired with ragged data).
+ *
+ * Properties, here and on dimensions and variables, are a plain object
+ * keyed by name.  Every entry has the same four fields and only the JS type
+ * of value changes, chosen by type:
+ *
+ *   { type: "realRange", value: [0, 100], units: "V", alt: {} }
+ *
+ *   string -> string, bool -> boolean, real -> Number, integer -> BigInt,
+ *   datetime -> ISO 8601 string as the producer wrote it, *Range -> a two
+ *   element array, *Array -> an array.  units is '' when none was given
+ *   and alt holds alternate language values keyed by ISO 639-1 code (empty
+ *   until das2C stores them).  Properties are the producer's message to the
+ *   client; this library never interprets them. */
 export class DasDataset {
-	#d; #p;
+	#d; #p; #meta;
+	#coords; #data;
 
-	constructor(das3, p){ this.#d = das3; this.#p = p; }
+	constructor(das3, p)
+	{
+		this.#d = das3; this.#p = p;
+		this.#meta = takeJson(das3, das3._c().dsJson(p));
+		reviveProps(this.#meta.props);
+		this.#coords = this.#meta.coords.map(m => new DasDim(das3, m, this.#meta.rank));
+		this.#data = this.#meta.data.map(m => new DasDim(das3, m, this.#meta.rank));
+	}
 	_p(){ return this.#p; }
 
-	get id(){ return this.#d._c().dsId(this.#p); }
-	get group(){ return this.#d._c().dsGroup(this.#p); }
-	get props(){ return readProps(this.#d._c(), this.#p); }
-	get rank(){ return this.#d._c().dsRank(this.#p); }
+	/** Dataset name, as in the header's <dataset name=...> */
+	get name(){ return this.#meta.name; }
 
-	/** Bulk shape as an array of ints, see the class comment */
+	/** Join group: datasets of one group are pieces of one quantity, '' if
+	 * the producer declared none */
+	get group(){ return this.#meta.group; }
+
+	get props(){ return this.#meta.props; }
+	get rank(){ return this.#meta.rank; }
+
+	/** Bulk shape as an array of ints, see the class comment.  Read live:
+	 * the record count grows as packets arrive. */
 	get shape()
 	{
 		const c = this.#d._c();
-		const n = c.dsRank(this.#p);
+		const n = this.#meta.rank;
 		const a = new Array(n);
 		for(let i = 0; i < n; ++i) a[i] = c.dsShapeAt(this.#p, i);
 		return a;
 	}
 
 	/** Coordinate dimensions (time, frequency, ...) */
-	get coords(){ return this.#dims(1); }
+	get coords(){ return this.#coords; }
 
 	/** Data dimensions (the measured quantities) */
-	get data(){ return this.#dims(0); }
+	get data(){ return this.#data; }
 
-	#dims(bCoord)
+	/** Look up a dimension by name in either group, undefined if absent */
+	dim(name)
 	{
-		const c = this.#d._c();
-		const n = c.dsDimCount(this.#p, bCoord);
-		const a = new Array(n);
-		for(let i = 0; i < n; ++i)
-			a[i] = new DasDim(this.#d, c.dsDimAt(this.#p, i, bCoord));
-		return a;
+		for(const d of this.#coords) if(d.name === name) return d;
+		for(const d of this.#data) if(d.name === name) return d;
+		return undefined;
 	}
 
-	/** Look up a dimension by id in either group, undefined if absent */
-	dim(id)
+	/** The dataset's structure as plain data, pointers dropped, shape read
+	 * live, BigInts as strings so JSON.stringify accepts it.  No data values. */
+	toJSON()
 	{
-		for(const d of this.coords) if(d.id === id) return d;
-		for(const d of this.data) if(d.id === id) return d;
-		return undefined;
+		return {
+			name: this.#meta.name, group: this.#meta.group, rank: this.#meta.rank,
+			shape: this.shape, props: plain(this.#meta.props),
+			coords: this.#coords.map(d => d.toJSON()),
+			data: this.#data.map(d => d.toJSON()),
+		};
 	}
 
 	/** Every variable of every dimension, as [dim, role, var] triples */
 	*vars()
 	{
-		for(const dim of this.coords.concat(this.data))
-			for(const [role, v] of dim.vars) yield [dim, role, v];
+		for(const dim of this.#coords.concat(this.#data))
+			for(const [role, v] of Object.entries(dim.vars)) yield [dim, role, v];
 	}
 
 	/** A variable whose extents v can wear where v's own shape says BORROW:
@@ -551,11 +649,11 @@ export class DasDataset {
 	shapeDonor(v)
 	{
 		const d = this.#d;
-		const iBorrow = v.shape(this.rank).indexOf(d.BORROW);
+		const iBorrow = v.shape.indexOf(d.BORROW);
 		if(iBorrow < 0) return undefined;
 		for(const [, , other] of this.vars()){
-			if(!other.isArrayBacked) continue;
-			const ext = other.shape(this.rank)[iBorrow];
+			if(other.source.kind !== 'array') continue;
+			const ext = other.shape[iBorrow];
 			if(ext > 0 || ext === d.RAGGED) return other;
 		}
 		return undefined;
@@ -566,28 +664,49 @@ export class DasDataset {
  * (center, min, max, reference, offset, ...) in describing one quantity.
  * Wraps a das2C DasDim. */
 export class DasDim {
-	#d; #p;
+	#d; #meta; #vars;
 
-	constructor(das3, p){ this.#d = das3; this.#p = p; }
-	_p(){ return this.#p; }
-
-	get id(){ return this.#d._c().dimId(this.#p); }
-	get isCoord(){ return this.#d._c().dimIsCoord(this.#p) !== 0; }
-	get props(){ return readProps(this.#d._c(), this.#p); }
-
-	/** Variables keyed by role, as a Map of role -> DasVar */
-	get vars()
+	constructor(das3, meta, dsRank)
 	{
-		const c = this.#d._c();
-		const n = c.dimVarCount(this.#p);
-		const vars = new Map();
-		for(let i = 0; i < n; ++i)
-			vars.set(c.dimRoleAt(this.#p, i), new DasVar(this.#d, c.dimVarAt(this.#p, i)));
-		return vars;
+		this.#d = das3; this.#meta = meta;
+		this.#vars = {};
+		for(const [role, vm] of Object.entries(meta.vars))
+			this.#vars[role] = new DasVar(das3, reviveVar(vm), dsRank);
+		reviveProps(meta.props);
 	}
+	_p(){ return this.#meta.ptr; }
+
+	/** Dimension name, unique within the dataset ("time", "B_mag", ...) */
+	get name(){ return this.#meta.name; }
+
+	/** The physical dimension ("time", "frequency", "electric_field"); two
+	 * dimensions of a dataset may share one, which is why name exists */
+	get physDim(){ return this.#meta.physDim; }
+
+	/** Plot axis affinities as the producer declared them, e.g. ['x'];
+	 * [] when none */
+	get axes(){ return this.#meta.axes; }
+
+	/** 'coord' or 'data' */
+	get kind(){ return this.#meta.kind; }
+
+	get props(){ return this.#meta.props; }
+
+	/** Variables keyed by role: dim.vars.center, dim.vars.offset, ... */
+	get vars(){ return this.#vars; }
 
 	/** The variable with the given role, 'center' by default, or undefined */
-	var(role = 'center'){ return this.vars.get(role); }
+	var(role = 'center'){ return this.#vars[role]; }
+
+	/** Plain data for JSON.stringify, see DasDataset.toJSON() */
+	toJSON()
+	{
+		const m = this.#meta;
+		const vars = {};
+		for(const [role, v] of Object.entries(this.#vars)) vars[role] = v.toJSON();
+		return {name: m.name, physDim: m.physDim, axes: m.axes, kind: m.kind,
+		        props: plain(m.props), vars};
+	}
 }
 
 /** A variable: dataset-shaped values of one element type.  Wraps a das2C
@@ -598,84 +717,102 @@ export class DasDim {
  * The important member is values().  Everything else is the metadata a
  * caller needs to interpret what values() returns. */
 export class DasVar {
-	#d; #p;
+	#d; #meta; #dsRank;
 
-	constructor(das3, p){ this.#d = das3; this.#p = p; }
-	_p(){ return this.#p; }
+	constructor(das3, meta, dsRank){ this.#d = das3; this.#meta = meta; this.#dsRank = dsRank; }
+	_p(){ return this.#meta.ptr; }
+
+	/** 'center', 'min', 'max', 'reference', 'offset', ... */
+	get role(){ return this.#meta.role; }
 
 	/** Units string, '' for dimensionless */
-	get units(){ return this.#d._c().varUnits(this.#p); }
+	get units(){ return this.#meta.units; }
 
-	/** Storage element type name, one of the keys of TYPED_ARRAYS plus
-	 * 'das_time', 'char*' and 'ubyte*'.  See glue/wasm.h. */
-	get valType(){ return this.#d._c().varValType(this.#p); }
+	/** What the values mean, one of the schema's closed set: 'bool',
+	 * 'datetime', 'integer', 'real', 'string', 'blob' */
+	get semantic(){ return this.#meta.semantic; }
+
+	/** How one storage element is laid out, one of the keys of TYPED_ARRAYS
+	 * plus 'das_time' (broken-down time, only from text encoded streams).
+	 * Strings and blobs are runs of 'ubyte'; their semantic says which. */
+	get storage(){ return this.#meta.storage; }
+
+	/** Shape in elements inside one value: [] for a scalar, [3] for a
+	 * 3-vector, [3, 3] for a rotation matrix, [DasRuntime.RAGGED] for
+	 * variable length text */
+	get innerShape(){ return this.#meta.innerShape; }
 
 	/** True if values() can return numbers (numeric or time elements) */
-	get isNumeric(){ return this.#d._c().varIsNumeric(this.#p) !== 0; }
+	get isNumeric(){ return this.#meta.isNumeric; }
 
-	/** Extent along each BULK dataset index: count, DasRuntime.RAGGED or
-	 * DasRuntime.UNUSED.  Same length as the owning dataset's shape. */
-	shape(dsRank)
+	get props(){ return this.#meta.props; }
+
+	/** Where the values come from: {kind: 'array'} for decoded stream
+	 * values (the zero-copy path), {kind: 'sequence', minval, interval} for
+	 * a value computed from the index, {kind: 'const'}, or {kind: 'binaryOp',
+	 * op: '+', left: 'reference', right: 'offset'} for a value combined from
+	 * two other variables of the same dimension, named by role (how a das2
+	 * waveform's time center is built).  minval and interval are typed values
+	 * {storage, units, value}; interval has one entry per dataset index,
+	 * null where the sequence does not run. */
+	get source(){ return this.#meta.source; }
+
+	/** The formalism, the header's <ops> element: {kind: 'linear'} by
+	 * default, {kind: 'point'} for a time stamp, {kind: 'vector', frame,
+	 * system, sysorder: [0, 1, 2]} and so on, parameters parsed by type.
+	 * Undefined for strings and blobs, which carry no math. */
+	get ops(){ return this.#meta.ops; }
+
+	/** Component symbols in storage order, ['x', 'y', 'z'] for a vector,
+	 * [] for a scalar; null entries where the formalism names none */
+	get symbols(){ return this.#meta.symbols; }
+
+	/** Plain data for JSON.stringify, see DasDataset.toJSON().  Adds the
+	 * live shape, which the snapshot does not carry. */
+	toJSON()
 	{
-		const c = this.#d._c();
-		const a = new Array(dsRank);
-		for(let i = 0; i < dsRank; ++i) a[i] = c.varShapeAt(this.#p, i);
-		return a;
+		const m = this.#meta;
+		const out = {role: m.role, units: m.units, semantic: m.semantic, storage: m.storage,
+		             shape: this.shape, innerShape: m.innerShape, isNumeric: m.isNumeric,
+		             props: plain(m.props), source: plain(m.source)};
+		if(m.ops !== undefined) out.ops = m.ops;
+		out.symbols = m.symbols;
+		return out;
 	}
 
-	/** Intrinsic (per record, internal) shape: [] for scalars, [3] for a
-	 * 3-vector, [DasRuntime.RAGGED] for variable length text */
-	get intrShape()
+	/** Extent along each BULK dataset index: count, DasRuntime.RAGGED,
+	 * DasRuntime.BORROW or DasRuntime.UNUSED.  Same length as the owning
+	 * dataset's shape, and read live since index 0 grows with the stream. */
+	get shape()
 	{
 		const c = this.#d._c();
-		const n = c.varIntrRank(this.#p);
-		const a = new Array(n);
-		for(let i = 0; i < n; ++i) a[i] = c.varIntrShapeAt(this.#p, i);
+		const a = new Array(this.#dsRank);
+		for(let i = 0; i < this.#dsRank; ++i) a[i] = c.varShapeAt(this.#meta.ptr, i);
 		return a;
 	}
-
-	/** Component symbols of a vector variable (['x','y','z']), [] otherwise */
-	get components()
-	{
-		const c = this.#d._c();
-		const a = [];
-		const shape = this.intrShape;
-		if(shape.length !== 1) return a;
-		for(let i = 0; i < shape[0]; ++i){
-			const s = c.varCompSym(this.#p, i);
-			if(s === '') break;
-			a.push(s);
-		}
-		return a;
-	}
-
-	/** True if this variable is backed by a decoded array in the heap, so
-	 * values() is zero-copy.  False for computed variables (sequences,
-	 * arithmetic on other variables), where values() materializes a copy. */
-	get isArrayBacked(){ return this.#d._c().varAry(this.#p) !== 0; }
 
 	/** The values.
 	 *
 	 * For numeric element types the result is the TypedArray matching
-	 * valType, in C index order over the backing array's shape (which you
-	 * get from arrayShape()).  When the variable is array-backed this is a
-	 * VIEW over the wasm heap: no copy, and the detached-view caveat at the
-	 * top of the file applies.  When it is not, das2C materializes a
-	 * rectangular copy (ragged edges padded with fill) and the result is an
-	 * independent TypedArray that outlives everything.
+	 * storage, in C index order over the backing array's shape (which you
+	 * get from arrayShape).  When source.kind is 'array' this is a VIEW over
+	 * the wasm heap: no copy, and the detached-view caveat at the top of
+	 * the file applies.  Otherwise das2C materializes a rectangular copy
+	 * (ragged edges padded with fill) and the result is an independent
+	 * TypedArray that outlives everything.
 	 *
 	 * 'das_time' elements, which only text-encoded streams produce, come
 	 * back as a Float64Array copy of seconds since 1958-01-01 (das2C's
 	 * internal epoch, no leap seconds).
 	 *
-	 * 'char*' (text) comes back as JavaScript strings, nested in Arrays to
-	 * the variable's shape: a rank 1 text variable gives Array<string>, a
-	 * rank 2 one (several status strings per record) Array<Array<string>>.
+	 * A 'string' semantic comes back as JavaScript strings, nested in Arrays
+	 * to the variable's shape: a rank 1 text variable gives Array<string>,
+	 * a rank 2 one (several status strings per record) Array<Array<string>>.
 	 * das2C stores such text as byte runs in a ragged ubyte array one rank
 	 * higher than the variable, so each string is decoded from the heap
 	 * individually; text is never zero-copy.
 	 *
-	 * 'ubyte*' (opaque byte runs) are not yet supported.
+	 * A 'blob' semantic (opaque byte runs) is not yet supported.
 	 *
 	 * A computed variable whose shape says DasRuntime.BORROW along some index has
 	 * no extent of its own there and cannot be materialized alone; pass a
@@ -692,11 +829,12 @@ export class DasVar {
 	{
 		const c = this.#d._c();
 		const m = this.#d._m();
+		const isText = (this.#meta.semantic === 'string');
 
-		let pAry = c.varAry(this.#p);
+		let pAry = c.varAry(this.#meta.ptr);
 		let owned = false;
 		if(pAry === 0){
-			pAry = c.varQube(this.#p, opts.shapeFrom ? opts.shapeFrom._p() : 0);
+			pAry = c.varQube(this.#meta.ptr, opts.shapeFrom ? opts.shapeFrom._p() : 0);
 			if(pAry === 0)
 				throw new DasError('cannot materialize values: ' + this.#d.lastError());
 			owned = true;
@@ -712,7 +850,7 @@ export class DasVar {
 			 * container rather than asking C for pointers into nothing. */
 			if(n === 0){
 				if(vt === 'das_time') return new Float64Array(0);
-				if(vt === 'char*' || this.valType === 'char*') return [];
+				if(vt === 'char*' || isText) return [];
 				const Ctor = TYPED_ARRAYS[vt];
 				return Ctor ? new Ctor(0) : [];
 			}
@@ -736,7 +874,7 @@ export class DasVar {
 			}
 
 			/* Text stored as byte runs: decode run by run */
-			if(this.valType === 'char*' && vt === 'ubyte')
+			if(isText && vt === 'ubyte')
 				return this.#textRuns(pAry, [], c.aryRank(pAry));
 
 			return this.#view(pAry, vt, c.aryData(pAry), n, owned || opts.copy);
@@ -800,16 +938,18 @@ export class DasVar {
 
 	/** Number of entries below a partial index of the backing array.
 	 *
-	 * This is how ragged data is walked: lengthAt([]) is the record count,
-	 * lengthAt([i]) the number of items in record i, and so on down.  Only
-	 * for array-backed variables.
+	 * This is how ragged data is walked: lengthIn([]) is the record count,
+	 * lengthIn([i]) the number of items in record i, and so on down.  The
+	 * name follows das2C's rule: "In" takes a partial index and answers for
+	 * the sub-array beneath it, "At" would take a full index and name one
+	 * value.  Only for array-backed variables (source.kind === 'array').
 	 *
-	 * @param {number[]} loc leading indices, fewer than arrayShape().length
+	 * @param {number[]} loc leading indices, fewer than arrayShape.length
 	 */
-	lengthAt(loc)
+	lengthIn(loc)
 	{
 		const c = this.#d._c();
-		const pAry = c.varAry(this.#p);
+		const pAry = c.varAry(this.#meta.ptr);
 		if(pAry === 0) throw new DasError('not an array-backed variable');
 		const n = c.aryLengthAt(pAry, this.#d._loc(loc), loc.length);
 		if(n < 0) throw new DasError(this.#d.lastError());
@@ -818,8 +958,8 @@ export class DasVar {
 
 	/** The numeric values below a partial index, as a zero-copy view.
 	 *
-	 * valuesAt([i]) is record i's values, however many there are, which is
-	 * what a ragged waveform plot wants.  valuesAt([]) equals values().
+	 * valuesIn([i]) is record i's values, however many there are, which is
+	 * what a ragged waveform plot wants.  valuesIn([]) equals values().
 	 * Numeric element types only; see values() for text and time.
 	 *
 	 * @param {number[]} loc leading indices
@@ -827,10 +967,10 @@ export class DasVar {
 	 * @param {boolean} [opts.copy=false]
 	 * @returns {TypedArray}
 	 */
-	valuesAt(loc, opts = {})
+	valuesIn(loc, opts = {})
 	{
 		const c = this.#d._c();
-		const pAry = c.varAry(this.#p);
+		const pAry = c.varAry(this.#meta.ptr);
 		if(pAry === 0) throw new DasError('not an array-backed variable');
 		const pLoc = this.#d._loc(loc);
 		const n = c.arySizeAt(pAry, pLoc, loc.length);
@@ -840,12 +980,12 @@ export class DasVar {
 	}
 
 	/** Shape of the array behind values(), which may have one more index
-	 * than the intrinsic shape (the record index) and may be ragged.  Null
-	 * for computed variables; use shape() and intrShape instead. */
+	 * than innerShape (the record index) and may be ragged.  Null for
+	 * computed variables; use shape and innerShape instead. */
 	get arrayShape()
 	{
 		const c = this.#d._c();
-		const pAry = c.varAry(this.#p);
+		const pAry = c.varAry(this.#meta.ptr);
 		if(pAry === 0) return null;
 		const n = c.aryRank(pAry);
 		const a = new Array(n);

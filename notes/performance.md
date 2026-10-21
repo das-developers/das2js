@@ -42,6 +42,29 @@ Once parsed, numeric values are not converted again: `DasVar.values()`
 returns a TypedArray view over the parsed data in its stored type
 (Float32Array, BigInt64Array for TT2000 times, and so on), not a copy.
 
+## Live streams in a browser
+
+`make perf` serves a page that fetches a stream from a server, then
+re-parses the same bytes from memory to separate the parser from the
+network.  Measured 2026-10-21 in headless Firefox 143 on the machine above,
+against the dasFlex server at space.physics.uiowa.edu:
+
+| stream                                  |    bytes | wall  | first record | re-parse | MB/s |
+|-----------------------------------------|---------:|------:|-------------:|---------:|-----:|
+| Juno Waves survey, 2 days, 86.4 s bins  |   1.2 MB | 18.9 s |       485 ms |    55 ms |   21 |
+| Juno Waves burst waveforms, 1 day       |   505 MB | 37.0 s |       466 ms |   330 ms | 1460 |
+
+Wall time is dominated by the server: the burst day took `curl` the same
+36 s, so parsing inside the download is free, and a progressive display can
+start drawing half a second after the request.  The burst stream is
+little-endian floats, which the parser copies at memory speed; the survey
+is a das2 stream with text in it.
+
+Memory: the parsed burst day occupied 1.5 GB of WebAssembly heap for 505 MB
+of values, because arrays grow by doubling and the heap never shrinks.
+The default heap limit is 2 GB, so streams much over 600 MB will not load
+in one piece today.
+
 ## Download size
 
 The three files from `make module`:

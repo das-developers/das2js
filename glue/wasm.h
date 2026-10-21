@@ -42,7 +42,8 @@
  * Ownership rules, uniform by prefix:
  *   - daswasm_var_ary() lends a pointer, never free it.
  *   - daswasm_var_qube() allocates, release with daswasm_ary_free().
- *   - daswasm_ary_times() allocates, release with daswasm_free().
+ *   - daswasm_ary_times(), daswasm_ds_json() and daswasm_desc_json()
+ *     allocate, release with daswasm_free().
  *   - Everything reachable from DasWasmRdr_stream() belongs to the reader
  *     unless DasWasmRdr_take() detached it.
  *
@@ -402,6 +403,43 @@ DAS_WASM_API void daswasm_ary_free(DasAry* pAry);
 
 /** Release a buffer obtained from daswasm_ary_times() */
 DAS_WASM_API void daswasm_free(void* pBuf);
+
+/* ************************************************************************ */
+/* Metadata snapshot */
+
+/** A dataset's whole structure as one JSON document.
+ *
+ * The structure of a dataset is fixed once its header has been parsed; only
+ * the record count grows as packets arrive.  So a foreign caller takes this
+ * once per dataset, parses it into plain objects, and afterwards makes C
+ * calls only for the things that change (daswasm_ds_shapeAt) and for value
+ * buffers.  Keys follow the das3 XML attribute names where they exist:
+ *
+ *   dataset  ptr, name, group, rank, shape, props, coords, data
+ *   dim      ptr, name, physDim, axes, kind ("coord"|"data"), props, vars
+ *   var      ptr, role, units, semantic, storage, innerShape, isNumeric,
+ *            props, source, ops (absent for byte runs), symbols
+ *   source   kind ("array"|"sequence"|"const"|"unaryOp"|"binaryOp"); a
+ *            sequence adds minval and interval as typed values, a binaryOp
+ *            adds op and the roles of its left and right operands
+ *   ops      kind plus the formalism's parameters, parsed by type
+ *   props    {name: {type, value, units, alt}} for every descriptor
+ *
+ * A typed value is {storage, units, value}.  Shape entries are counts or
+ * the negative sentinels from daswasm_idxRagged() and friends.  Integers
+ * that may exceed 53 bits (64-bit storage, integer properties) are JSON
+ * STRINGS so a JavaScript caller can make BigInts of them; everything else
+ * is a JSON number, string, boolean or null (for a non-finite real).
+ *
+ * @returns a NUL terminated UTF-8 string the caller frees with
+ *          daswasm_free(), or NULL on error (see daswasm_lastError)
+ * @memberof DasDs
+ */
+DAS_WASM_API char* daswasm_ds_json(DasDs* pDs);
+
+/** The properties of any descriptor (a stream, usually) as JSON, in the
+ * props form described at daswasm_ds_json().  Free with daswasm_free(). */
+DAS_WASM_API char* daswasm_desc_json(const DasDesc* pDesc);
 
 /** @} */
 

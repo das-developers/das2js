@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include <das3/core.h>
+#include <das3/json.h>
 #include "wasm.h"
 
 #define CHECK(COND, MSG) \
@@ -240,6 +241,95 @@ static int walkStream(DasStream* pSd, const char* sPath)
 	return 0;
 }
 
+
+/* The JSON snapshot must agree with the per-field accessors, which are the
+   oracle here: name, rank, dimension counts, roles, storage, and the
+   properties of every descriptor.  Parsed with das2C's own JSON reader. */
+static const char* jstr(const DasJdo* pJdo, const char* sPath)
+{
+	const DasJdo* p = DasJdo_get(pJdo, sPath);
+	return (p != NULL) ? DasJdo_string(p) : NULL;
+}
+
+static int checkSnapshot(DasStream* pSd, const char* sPath)
+{
+	char* sJson = daswasm_desc_json((DasDesc*)pSd);
+	CHECK(sJson != NULL, "stream props snapshot failed");
+	DasJdo* pProps = das_json_parse(sJson, strlen(sJson));
+	CHECK(pProps != NULL, "stream props snapshot is not valid JSON");
+	const das_json_dict* pDict = DasJdo_dict(pProps);
+	CHECK(pDict != NULL, "stream props snapshot is not an object");
+	CHECK((int)pDict->length == daswasm_desc_propCount((DasDesc*)pSd), "stream property count differs from accessor");
+	free(pProps);
+	daswasm_free(sJson);
+
+	int nDs = daswasm_strm_dsCount(pSd);
+	for(int iDs = 0; iDs < nDs; ++iDs){
+		DasDs* pDs = daswasm_strm_dsAt(pSd, iDs);
+		sJson = daswasm_ds_json(pDs);
+		CHECK(sJson != NULL, "dataset snapshot failed");
+		DasJdo* pJdo = das_json_parse(sJson, strlen(sJson));
+		if(pJdo == NULL) printf("ERROR: %s\n", sJson);
+		CHECK(pJdo != NULL, "dataset snapshot is not valid JSON");
+
+		const char* sName = jstr(pJdo, "name");
+		CHECK((sName != NULL)&&(strcmp(sName, daswasm_ds_id(pDs)) == 0), "snapshot name differs from accessor");
+		const DasJdo* pRank = DasJdo_get(pJdo, "rank");
+		CHECK((pRank != NULL)&&(atoi(((das_json_num*)pRank->value)->number) == daswasm_ds_rank(pDs)), "snapshot rank differs");
+		const DasJdo* pShape = DasJdo_get(pJdo, "shape");
+		CHECK((pShape != NULL)&&(pShape->type == das_json_type_ary), "snapshot shape missing");
+		CHECK((int)((das_json_ary*)pShape->value)->length == daswasm_ds_rank(pDs), "snapshot shape length is not the rank");
+
+		const char* asKinds[] = {"data", "coords"};
+		for(int iKind = 0; iKind < 2; ++iKind){
+			const DasJdo* pDims = DasJdo_get(pJdo, asKinds[iKind]);
+			CHECK((pDims != NULL)&&(pDims->type == das_json_type_ary), "snapshot dims missing");
+			CHECK((int)((das_json_ary*)pDims->value)->length == daswasm_ds_dimCount(pDs, iKind), "snapshot dim count differs");
+			int iDim = 0;
+			for(const das_json_ary_el* pEl = DasJdo_aryFirst(pDims); pEl != NULL; pEl = pEl->next, ++iDim){
+				DasDim* pDim = daswasm_ds_dimAt(pDs, iDim, iKind);
+				const char* sDim = jstr(pEl->value, "name");
+				CHECK((sDim != NULL)&&(strcmp(sDim, daswasm_dim_id(pDim)) == 0), "snapshot dim name differs");
+				const char* sKind = jstr(pEl->value, "kind");
+				CHECK((sKind != NULL)&&(strcmp(sKind, iKind ? "coord" : "data") == 0), "snapshot dim kind differs");
+				const DasJdo* pVars = DasJdo_get(pEl->value, "vars");
+				CHECK((pVars != NULL)&&(pVars->type == das_json_type_dict), "snapshot vars missing");
+				CHECK((int)((das_json_dict*)pVars->value)->length == daswasm_dim_varCount(pDim), "snapshot var count differs");
+				int iVar = 0;
+				for(const das_json_dict_el* pV = DasJdo_dictFirst(pVars); pV != NULL; pV = pV->next, ++iVar){
+					DasVar* pVar = daswasm_dim_varAt(pDim, iVar);
+					CHECK(strcmp(pV->name->string, daswasm_dim_roleAt(pDim, iVar)) == 0, "snapshot role differs from accessor");
+					const char* sRole = jstr(pV->value, "role");
+					CHECK((sRole != NULL)&&(strcmp(sRole, pV->name->string) == 0), "snapshot var role differs from its key");
+					const char* sSem = jstr(pV->value, "semantic");
+					const char* sStore = jstr(pV->value, "storage");
+					CHECK((sSem != NULL)&&(sStore != NULL)&&(sSem[0] != '\0')&&(sStore[0] != '\0'), "snapshot var without semantic/storage");
+					/* byte runs report ubyte elements, everything else das_vt_toStr's name */
+					const char* sVt = daswasm_var_valType(pVar);
+					bool bBytes = (strcmp(sVt, "char*") == 0)||(strcmp(sVt, "ubyte*") == 0);
+					CHECK(strcmp(sStore, bBytes ? "ubyte" : sVt) == 0, "snapshot storage differs from accessor");
+					CHECK(bBytes == ((strcmp(sSem, "string") == 0)||(strcmp(sSem, "blob") == 0)), "snapshot semantic disagrees with byte run class");
+					CHECK(bBytes == (DasJdo_get(pV->value, "ops") == NULL), "ops presence disagrees with byte run class");
+					const char* sGen = jstr(pV->value, "source/kind");
+					CHECK(sGen != NULL, "snapshot var without source kind");
+					CHECK((strcmp(sGen, "array") == 0) == (daswasm_var_ary(pVar) != NULL), "source kind disagrees with backing array");
+					const DasJdo* pSyms = DasJdo_get(pV->value, "symbols");
+					CHECK((pSyms != NULL)&&(pSyms->type == das_json_type_ary), "snapshot var without symbols");
+					if(!bBytes && (daswasm_var_intrRank(pVar) == 1) && (daswasm_var_compSym(pVar, 0) != NULL))
+						CHECK((int)((das_json_ary*)pSyms->value)->length == daswasm_var_intrShapeAt(pVar, 0), "symbol count differs from inner extent");
+					const DasJdo* pP = DasJdo_get(pV->value, "props");
+					CHECK((pP != NULL)&&(pP->type == das_json_type_dict), "snapshot var without props");
+					CHECK((int)((das_json_dict*)pP->value)->length == daswasm_desc_propCount((DasDesc*)pVar), "var property count differs");
+				}
+			}
+		}
+		free(pJdo);
+		daswasm_free(sJson);
+	}
+	printf("INFO: %s: snapshot agrees with the accessors for %d dataset(s)\n", sPath, nDs);
+	return 0;
+}
+
 int main(int argc, char** argv)
 {
 	daswasm_init(argv[0]);
@@ -262,6 +352,8 @@ int main(int argc, char** argv)
 		if(pRdr == NULL) return 64;
 
 		if(walkStream(DasWasmRdr_stream(pRdr), aFiles[i]) != 0)
+			return 64;
+		if(checkSnapshot(DasWasmRdr_stream(pRdr), aFiles[i]) != 0)
 			return 64;
 
 		/* stream-level properties flow through the descriptor calls */

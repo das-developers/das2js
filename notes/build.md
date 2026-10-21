@@ -58,6 +58,13 @@ nearly all of it is a test that feeds every fixture one byte at a time.
 To open the test page in your own browser instead, run `make serve` and load
 the URL it prints; Ctrl-C stops it.
 
+`make inspect` serves a structure inspector instead: give it any stream URL
+and it prints every dataset, dimension and variable as JSON, without the
+data values.  A fixture loads by default; `?url=...` bookmarks a stream.
+`make perf` serves a timing page: it fetches a live stream (Juno Waves at
+Iowa by default), then re-parses the same bytes from memory so parser
+throughput shows separately from the network.
+
 ## Clean rebuild
 
 After pulling a new das2C, or when in doubt:

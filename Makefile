@@ -188,6 +188,14 @@ PAGE?=TestModule.html
 serve: module
 	$(NODE) test/browser/run.mjs $(PAGE) --serve $(RUNFLAGS)
 
+# The structure inspector: load any stream URL, see the whole dataset tree
+inspect: module
+	$(NODE) test/browser/run.mjs Inspect.html --serve $(RUNFLAGS)
+
+# Real-world timing against a live server, then re-parse from memory
+perf: module
+	$(NODE) test/browser/run.mjs Perf.html --serve $(RUNFLAGS)
+
 wasm_test: $(EXPAT_LIB)
 	$(MAKE) -C $(DAS2C) EMSCRIPTEN=yes EXPAT_INC=$(EXPAT_INC) EXPAT_LIB=$(EXPAT_LIB) test
 
