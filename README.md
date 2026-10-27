@@ -12,7 +12,8 @@ views of the decoded values without a conversion pass.
 **Early days, but it runs.**  `make module` produces a three-file ES module
 in `build.wasm32/` (`das2js.mjs`, `das2c.mjs`, `das2c.wasm`) that fetches a
 das stream, parses it as it arrives, and hands back TypedArray views of the
-decoded values, int64 and all.  It has read real data from a public dasFlex
+decoded values, int64 and all, plus a one-call exact conversion of an int64
+time axis to plot-ready doubles.  It has read real data from a public dasFlex
 server in Firefox.  No package, no minified build, no catalog browser, no
 plotting; a progress meter, a source picker, a catalog tree view and a
 live spectrogram are the planned demos.  Layout:

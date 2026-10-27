@@ -42,6 +42,27 @@ Once parsed, numeric values are not converted again: `DasVar.values()`
 returns a TypedArray view over the parsed data in its stored type
 (Float32Array, BigInt64Array for TT2000 times, and so on), not a copy.
 
+## Getting doubles out of an int64 axis
+
+The view is free; reading it is not always.  TT2000 is the common time base
+in heliophysics and das2C stores it as int64, so `values()` on a time axis
+is a BigInt64Array.  Every element read from one allocates a BigInt, and a
+plotting library wants Numbers.  Converting one million values in
+JavaScript, measured 2026-10-27 under Node 24 on the machine above:
+
+| approach                                              |   time |
+|-------------------------------------------------------|-------:|
+| `Float64Array.from(big, Number)`                      | 404 ms |
+| `for` loop, `out[i] = Number(big[i])`                 |  59 ms |
+| `DasVar.doubles()` (one C loop, `daswasm_ary_doubles`) |   2 ms |
+| plain Float64Array copy, the floor                    |   3 ms |
+
+So use `v.doubles({ref: 'first', scale: 1e-9})` for a time axis, which
+gives seconds from the first sample as a Float64Array, fill as NaN.  The
+subtraction happens in int64 before the cast; a TT2000 value in the 2020s
+is about 8e17 and a double quantizes it to 128 ns, so `Number(t) -
+Number(t0)` is not the same number as `Number(t - t0)`.
+
 ## Live streams in a browser
 
 `make perf` serves a page that fetches a stream from a server, then

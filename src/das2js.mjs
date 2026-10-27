@@ -152,6 +152,7 @@ export class DasRuntime {
 			arySizeAt:     w('daswasm_ary_sizeAt', N, [N, N, N]),
 			aryDataAt:     w('daswasm_ary_dataAt', N, [N, N, N]),
 			aryTimes:      w('daswasm_ary_times', N, [N]),
+			aryDoubles:    w('daswasm_ary_doubles', N, [N, N, N]),
 			aryFree:       w('daswasm_ary_free', null, [N]),
 			free:          w('daswasm_free', null, [N]),
 		};
@@ -168,8 +169,14 @@ export class DasRuntime {
 		/* Partial-index calls take a C int array.  das2C arrays have at most
 		 * 8 indices, so one 32-byte scratch buffer serves every call. */
 		this.#loc = m._malloc(8 * 4);
+
+		/* One element of any storage type, for the reference value of
+		 * DasVar.doubles().  malloc aligns to 8, which the DataView and
+		 * TypedArray writes in _ref() need. */
+		this.#ref = m._malloc(8);
 	}
 	#loc;
+	#ref;
 
 	/* Copy a JavaScript index list into the scratch buffer and return its
 	 * heap address.  HEAP32 is indexed in 4-byte units, hence the >> 2. */
@@ -178,6 +185,33 @@ export class DasRuntime {
 		if(loc.length > 8) throw new RangeError('index list longer than 8');
 		this.#m.HEAP32.set(loc, this.#loc >> 2);
 		return this.#loc;
+	}
+
+	/* Write one value into the reference scratch slot as storage type vt
+	 * and return its heap address, or 0 when no value was given (C reads
+	 * NULL as "no offset").  The 64-bit integer types go through a
+	 * DataView: a BigInt64Array element only accepts a BigInt, and a caller
+	 * may reasonably pass a Number for a small offset, so both are taken
+	 * and BigInt() does the widening (it throws on a fractional Number,
+	 * which is the right answer for an integer axis).  Everything else is
+	 * written through the matching TypedArray, which rounds a Number into
+	 * the storage type the way C would.  Wasm memory is little-endian. */
+	_ref(vt, value)
+	{
+		if(value === undefined || value === null) return 0;
+		const m = this.#m;
+		if(vt === 'long' || vt === 'ulong'){
+			const dv = new DataView(m.HEAPU8.buffer, this.#ref, 8);
+			const big = (typeof value === 'bigint') ? value : BigInt(value);
+			if(vt === 'long') dv.setBigInt64(0, big, true);
+			else dv.setBigUint64(0, big, true);
+		}
+		else{
+			const Ctor = TYPED_ARRAYS[vt];
+			if(Ctor === undefined) throw new DasError(`no reference value for storage ${vt}`);
+			new Ctor(m.HEAPU8.buffer, this.#ref, 1)[0] = Number(value);
+		}
+		return this.#ref;
 	}
 
 	/* Internal accessors for the sibling classes in this file.  JavaScript
@@ -878,6 +912,103 @@ export class DasVar {
 				return this.#textRuns(pAry, [], c.aryRank(pAry));
 
 			return this.#view(pAry, vt, c.aryData(pAry), n, owned || opts.copy);
+		}
+		finally{
+			if(owned) c.aryFree(pAry);
+		}
+	}
+
+	/** The values as a Float64Array, re-based and scaled, fill as NaN.
+	 *
+	 *   out[i] = (value[i] - ref) * scale
+	 *
+	 * This is the plot-ready form, and the right way to consume an integer
+	 * axis.  values() on a TT2000 time variable is a BigInt64Array, which
+	 * is exact and free to create but costly to read: every element access
+	 * from JavaScript allocates a BigInt, and turning a million of them into
+	 * Numbers takes tens to hundreds of milliseconds.  This method does the
+	 * same conversion in one C loop at memory speed and, more importantly,
+	 * does the subtraction in int64 BEFORE the cast.  TT2000 values in the
+	 * 2020s are around 8e17, far past the 2^53 limit of exact integers in a
+	 * double, so Number(t) is quantized to 128 ns; Number(t - t0) is exact.
+	 *
+	 * Fill elements (the array's declared fill value) come back as NaN,
+	 * which is what plotting libraries treat as a gap.  Leap seconds are not
+	 * handled here: TT2000 times scale 1e-9 are TT seconds, not UTC.
+	 *
+	 * The result is always an independent copy, never a view; keep it as
+	 * long as you like.  Text and blob variables are refused.
+	 *
+	 * @param {object} [opts]
+	 * @param {bigint|number|'first'} [opts.ref] Reference subtracted from
+	 *        every value, in the variable's own storage units (TT2000
+	 *        nanoseconds for a TT2000 axis; for 'das_time' storage, the
+	 *        seconds since 1958 that values() returns).  'first' uses the
+	 *        first stored value, the usual choice for a time axis.  Default
+	 *        none.
+	 * @param {number} [opts.scale=1] Multiplier applied after the
+	 *        subtraction: 1e-9 makes seconds of TT2000 nanoseconds
+	 * @param {DasVar} [opts.shapeFrom] As for values()
+	 * @returns {Float64Array}
+	 */
+	doubles(opts = {})
+	{
+		const c = this.#d._c();
+		const m = this.#d._m();
+		const sem = this.#meta.semantic;
+		if(sem === 'string' || sem === 'blob')
+			throw new DasError(`${sem} values have no double form`);
+		const scale = (opts.scale === undefined) ? 1 : opts.scale;
+
+		let pAry = c.varAry(this.#meta.ptr);
+		let owned = false;
+		if(pAry === 0){
+			pAry = c.varQube(this.#meta.ptr, opts.shapeFrom ? opts.shapeFrom._p() : 0);
+			if(pAry === 0)
+				throw new DasError('cannot materialize values: ' + this.#d.lastError());
+			owned = true;
+		}
+
+		try{
+			const vt = c.aryValType(pAry);
+			const n = c.arySize(pAry);
+			if(n === 0) return new Float64Array(0);
+
+			/* Broken-down times (text das2 streams) are already a C copy of
+			 * doubles after aryTimes; re-base and scale that in place.  A
+			 * Float64Array loop in JavaScript is memory-speed, it is only
+			 * the BigInt path that is slow. */
+			if(vt === 'das_time'){
+				const pSec = c.aryTimes(pAry);
+				if(pSec === 0)
+					throw new DasError('time conversion failed: ' + this.#d.lastError());
+				let out;
+				try{ out = new Float64Array(m.HEAPU8.buffer, pSec, n).slice(); }
+				finally{ c.free(pSec); }
+				if(opts.ref !== undefined || scale !== 1){
+					const r = (opts.ref === 'first') ? out[0] : Number(opts.ref ?? 0);
+					for(let i = 0; i < n; ++i) out[i] = (out[i] - r) * scale;
+				}
+				return out;
+			}
+
+			/* 'first' is read straight out of the heap as the storage type,
+			 * one element, so a BigInt is made at most once here */
+			let ref = opts.ref;
+			if(ref === 'first'){
+				const Ctor = TYPED_ARRAYS[vt];
+				if(Ctor === undefined) throw new DasError(`element type ${vt} is not convertible`);
+				ref = new Ctor(m.HEAPU8.buffer, c.aryData(pAry), 1)[0];
+			}
+			const pOut = c.aryDoubles(pAry, this.#d._ref(vt, ref), scale);
+			if(pOut === 0)
+				throw new DasError('double conversion failed: ' + this.#d.lastError());
+			try{
+				/* slice() copies out of the heap before the buffer is freed;
+				 * take HEAPU8 fresh, the malloc inside C may have grown it */
+				return new Float64Array(this.#d._m().HEAPU8.buffer, pOut, n).slice();
+			}
+			finally{ c.free(pOut); }
 		}
 		finally{
 			if(owned) c.aryFree(pAry);

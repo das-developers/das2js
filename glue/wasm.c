@@ -19,7 +19,7 @@
 #include <math.h>
 
 #include <das3/core.h>
-#include <das3/generator.h>
+#include <das3/gen_priv.h>
 #include <das3/form.h>
 #include "wasm.h"
 
@@ -110,7 +110,7 @@ DasWasmRdr* new_DasWasmRdr(void)
 		free(pThis);
 		return NULL;
 	}
-	DasIO_model(pThis->pIo, 3);  /* foreign callers only see the das3 model */
+	DasIO_setModel(pThis->pIo, STREAM_MODEL_V3);  /* foreign callers only see the das3 model */
 
 	pThis->pBldr = new_DasDsBldr();
 	DasIO_addProcessor(pThis->pIo, (StreamHandler*)pThis->pBldr);
@@ -444,6 +444,72 @@ double* daswasm_ary_times(DasAry* pAry)
 		pOut[u] = dt_ttime(pTimes + u);
 	return pOut;
 }
+
+/* One typed pass of daswasm_ary_doubles.  DIFF is spelled per type by the
+   caller because the exactness argument differs: integer elements widen to
+   int64 and subtract there, so a TT2000 axis re-based on its own first
+   sample never meets a double until the residual is small; float elements
+   subtract as doubles.  The fill test is a bitwise-equal compare in the
+   element type, which is what das2C itself does when it asks "is this
+   fill", and is why a NaN fill on a real array falls through: NaN != NaN,
+   but the cast then yields NaN anyway. */
+#define _DASWASM_TO_DBL(T, DIFF) do{ \
+	const T* pIn = (const T*)pData; \
+	const T fill = *((const T*)pFill); \
+	const T ref = (pRef != NULL) ? *((const T*)pRef) : (T)0; \
+	for(size_t u = 0; u < uVals; ++u) \
+		pOut[u] = (pIn[u] == fill) ? NAN : ((double)(DIFF)) * rScale; \
+}while(0)
+
+double* daswasm_ary_doubles(DasAry* pAry, const ubyte* pRef, double rScale)
+{
+	das_val_type vt = DasAry_valType(pAry);
+	if((vt < vtUByte)||(vt > vtDouble)){
+		das_error(DASERR_ARRAY, "No double conversion for arrays of %s elements",
+		          das_vt_toStr(vt));
+		return NULL;
+	}
+
+	/* Same empty-array contract as daswasm_ary_times: a header with no
+	   records yet is not an error, answer with a real (if useless) buffer */
+	size_t uVals = 0;
+	const ubyte* pData = DasAry_getIn(pAry, vt, DIM0, &uVals);
+	if((pData == NULL)&&(DasAry_size(pAry) != 0))
+		return NULL;
+	if(pData == NULL)
+		uVals = 0;
+
+	double* pOut = (double*)malloc((uVals > 0 ? uVals : 1) * sizeof(double));
+	if(pOut == NULL){
+		das_error(DASERR_ARRAY, "Couldn't allocate %zu doubles", uVals);
+		return NULL;
+	}
+	if(uVals == 0)
+		return pOut;
+
+	const ubyte* pFill = DasAry_getFill(pAry);
+
+	/* The two 64-bit cases subtract as uint64 and reinterpret: signed
+	   overflow is undefined in C, unsigned wrap is defined, and the wrapped
+	   bit pattern read as int64 is the right signed difference whenever
+	   that difference fits, which for a time axis it always does */
+	switch(vt){
+	case vtUByte:  _DASWASM_TO_DBL(uint8_t,  (int64_t)pIn[u] - (int64_t)ref); break;
+	case vtByte:   _DASWASM_TO_DBL(int8_t,   (int64_t)pIn[u] - (int64_t)ref); break;
+	case vtUShort: _DASWASM_TO_DBL(uint16_t, (int64_t)pIn[u] - (int64_t)ref); break;
+	case vtShort:  _DASWASM_TO_DBL(int16_t,  (int64_t)pIn[u] - (int64_t)ref); break;
+	case vtUInt:   _DASWASM_TO_DBL(uint32_t, (int64_t)pIn[u] - (int64_t)ref); break;
+	case vtInt:    _DASWASM_TO_DBL(int32_t,  (int64_t)pIn[u] - (int64_t)ref); break;
+	case vtULong:  _DASWASM_TO_DBL(uint64_t, (int64_t)(pIn[u] - ref)); break;
+	case vtLong:   _DASWASM_TO_DBL(int64_t,  (int64_t)((uint64_t)pIn[u] - (uint64_t)ref)); break;
+	case vtFloat:  _DASWASM_TO_DBL(float,    (double)pIn[u] - (double)ref); break;
+	case vtDouble: _DASWASM_TO_DBL(double,   pIn[u] - ref); break;
+	default: break;  /* excluded above */
+	}
+	return pOut;
+}
+
+#undef _DASWASM_TO_DBL
 
 void daswasm_ary_free(DasAry* pAry)
 {

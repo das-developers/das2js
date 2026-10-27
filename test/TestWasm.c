@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include <das3/core.h>
 #include <das3/json.h>
@@ -154,6 +155,11 @@ static int walkStream(DasStream* pSd, const char* sPath)
 							CHECK(pSec != NULL, "time conversion of an empty array failed");
 							daswasm_free(pSec);
 						}
+						else if(DasAry_valType(pAry) <= vtDouble){
+							double* pDbl = daswasm_ary_doubles(pAry, NULL, 1.0);
+							CHECK(pDbl != NULL, "double conversion of an empty array failed");
+							daswasm_free(pDbl);
+						}
 						continue;
 					}
 					if(pAry != NULL){
@@ -199,6 +205,30 @@ static int walkStream(DasStream* pSd, const char* sPath)
 							CHECK((pSec[0] > 0.0)&&(pSec[0] < 4.5e9),
 							      "converted time out of plausible range");
 							daswasm_free(pSec);
+						}
+
+						/* Plot-ready doubles: every numeric array converts, and
+						   re-basing on its own first element is exact in the
+						   element's type.  For int64 that is the whole point:
+						   compare against integer arithmetic, not against a
+						   double that may already have rounded. */
+						das_val_type vt = DasAry_valType(pAry);
+						if((vt >= vtUByte)&&(vt <= vtDouble)){
+							int nVals = daswasm_ary_size(pAry);
+							double* pDbl = daswasm_ary_doubles(pAry, NULL, 1.0);
+							CHECK(pDbl != NULL, "double conversion failed");
+							double* pRel = daswasm_ary_doubles(pAry, daswasm_ary_data(pAry), 1.0);
+							CHECK(pRel != NULL, "re-based double conversion failed");
+							CHECK(isnan(pRel[0]) || (pRel[0] == 0.0), "re-based first element is not zero");
+							if(vt == vtLong){
+								const int64_t* pL = (const int64_t*)daswasm_ary_data(pAry);
+								for(int i = 0; i < nVals; ++i){
+									if(isnan(pRel[i])) continue;
+									CHECK(pRel[i] == (double)(pL[i] - pL[0]), "re-based int64 differs from exact difference");
+								}
+							}
+							daswasm_free(pDbl);
+							daswasm_free(pRel);
 						}
 					}
 
@@ -369,6 +399,38 @@ int main(int argc, char** argv)
 		}
 
 		del_DasWasmRdr(pRdr);
+	}
+
+	/* Fill to NaN and exact re-basing, on a hand built TT2000 array holding
+	   2^53 and its neighbors: 2^53 + 1 has no double, so a conversion that
+	   cast first and subtracted second would report the second difference
+	   as 0 instead of 1.  INT64_MIN is the usual TT2000 fill. */
+	{
+		int64_t nFill = INT64_MIN;
+		size_t uShape = 0;
+		DasAry* pAry = new_DasAry("t", vtLong, 0, (const ubyte*)&nFill, 1, &uShape, UNIT_TT2000);
+		if(pAry == NULL){ printf("ERROR: couldn't build a test array\n"); return 64; }
+		int64_t aVals[4] = {9007199254740992LL, 9007199254740993LL, INT64_MIN, 9007199254740994LL};
+		DasAry_append(pAry, (const ubyte*)aVals, 4);
+
+		double* pOut = daswasm_ary_doubles(pAry, (const ubyte*)aVals, 1e-9);
+		if(pOut == NULL){ printf("ERROR: %s\n", daswasm_lastError()); return 64; }
+		if((pOut[0] != 0.0)||(pOut[1] != 1e-9)||(!isnan(pOut[2]))||(pOut[3] != 2e-9)){
+			printf("ERROR: re-based TT2000 doubles wrong: %.17g %.17g %.17g %.17g\n",
+			       pOut[0], pOut[1], pOut[2], pOut[3]);
+			return 64;
+		}
+		daswasm_free(pOut);
+
+		/* without a reference the 2^53 + 1 value must round, proving the
+		   check above exercised the pre-cast subtraction */
+		pOut = daswasm_ary_doubles(pAry, NULL, 1.0);
+		if((pOut == NULL)||(pOut[1] != 9007199254740992.0)||(!isnan(pOut[2]))){
+			printf("ERROR: plain TT2000 doubles wrong\n");
+			return 64;
+		}
+		daswasm_free(pOut);
+		daswasm_ary_free(pAry);
 	}
 
 	/* Ownership handoff: take the stream, kill the reader, walk, free */

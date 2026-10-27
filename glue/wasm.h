@@ -33,7 +33,9 @@
  *      backed (daswasm_var_ary), falling back to daswasm_var_qube for
  *      computed variables and ragged data.  Wrap the returned pointer in a
  *      JS TypedArray view over the wasm heap; nothing is converted per
- *      value.
+ *      value.  When the consumer needs doubles (a plotting library fed a
+ *      TT2000 int64 axis) take daswasm_ary_doubles() instead of walking a
+ *      BigInt64Array from JavaScript: one C loop, exact re-basing.
  *
  * Browser caveat that can't be fixed here: growing the wasm heap detaches
  * existing TypedArray views.  Create views after the stream completes and
@@ -42,8 +44,8 @@
  * Ownership rules, uniform by prefix:
  *   - daswasm_var_ary() lends a pointer, never free it.
  *   - daswasm_var_qube() allocates, release with daswasm_ary_free().
- *   - daswasm_ary_times(), daswasm_ds_json() and daswasm_desc_json()
- *     allocate, release with daswasm_free().
+ *   - daswasm_ary_times(), daswasm_ary_doubles(), daswasm_ds_json() and
+ *     daswasm_desc_json() allocate, release with daswasm_free().
  *   - Everything reachable from DasWasmRdr_stream() belongs to the reader
  *     unless DasWasmRdr_take() detached it.
  *
@@ -397,6 +399,42 @@ DAS_WASM_API const ubyte* daswasm_ary_dataAt(DasAry* pAry, const int* pLoc, int 
  * @memberof DasAry
  */
 DAS_WASM_API double* daswasm_ary_times(DasAry* pAry);
+
+/** Every element of a numeric array as doubles, re-based and scaled.
+ *
+ *   out[i] = (x[i] - ref) * rScale,  or NaN where x[i] is the array's fill
+ *
+ * The plot-ready form of an integer axis, and the answer to "my plotting
+ * library wants a Float64Array and values() gave me a BigInt64Array".
+ * Reading a BigInt64Array element by element from JavaScript allocates a
+ * BigInt per element and runs twenty to a hundred times slower than this
+ * loop, which never leaves C.
+ *
+ * The subtraction is done in the element's own integer type, so a TT2000
+ * axis (nanoseconds past J2000, about 8e17 in the 2020s, far beyond the
+ * 2^53 integers a double can hold) re-based to its first sample or to any
+ * nearby epoch is EXACT; only the small residual is cast.  Convert first
+ * and subtract second and the same axis is quantized to 128 ns.  Unsigned
+ * 64-bit elements use the two's complement wrap of (x - ref), correct for
+ * any difference under 2^63 in magnitude.
+ *
+ * Nothing here knows about leap seconds: TT2000 scaled by 1e-9 is TT
+ * seconds, not UTC seconds.  Leap-second aware conversion is a per-value
+ * das2C call and does not belong on the bulk path.
+ *
+ * @param pAry Any array of elements "ubyte" through "double".  "das_time"
+ *        arrays take daswasm_ary_times(); text and byte runs are refused.
+ * @param pRef Pointer to ONE element in the array's own storage type (8
+ *        bytes of int64 for a "long" array, 4 bytes of float for "float"),
+ *        or NULL for no offset.  Pointing at daswasm_ary_data() re-bases on
+ *        the first element.
+ * @param rScale Multiplier applied after the subtraction, 1.0 for none.
+ *        1e-9 turns TT2000 nanoseconds into seconds, 1e-6 into milliseconds.
+ * @returns a newly allocated buffer of daswasm_ary_size() doubles, or NULL
+ *        on error (see daswasm_lastError).  Free with daswasm_free().
+ * @memberof DasAry
+ */
+DAS_WASM_API double* daswasm_ary_doubles(DasAry* pAry, const ubyte* pRef, double rScale);
 
 /** Release an array obtained from daswasm_var_qube() */
 DAS_WASM_API void daswasm_ary_free(DasAry* pAry);

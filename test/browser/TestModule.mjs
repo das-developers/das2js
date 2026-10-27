@@ -211,6 +211,27 @@ function walkStream(d, strm, name)
 						check(total === vals.length, `${tag}: records do not tile the array`);
 					}
 				}
+
+				/* doubles(): the plot-ready form of anything numeric.  Always
+				 * a fresh Float64Array of the same length; re-based on the
+				 * first element the first entry is 0 (or NaN for fill) and,
+				 * for int64 storage, every entry equals the exact BigInt
+				 * difference.  That last check is the reason the method
+				 * exists: it would fail if C cast before subtracting. */
+				if(v.semantic !== 'string'){
+					const dbl = v.doubles({shapeFrom: donor});
+					check(dbl instanceof Float64Array, `${tag}: doubles() not a Float64Array`);
+					check(dbl.length === vals.length, `${tag}: doubles() length ${dbl.length} != ${vals.length}`);
+					check(dbl.buffer !== d._m().HEAPU8.buffer, `${tag}: doubles() aliases the heap`);
+					const rel = v.doubles({ref: 'first', shapeFrom: donor});
+					check(rel[0] === 0 || Number.isNaN(rel[0]), `${tag}: re-based first element is ${rel[0]}`);
+					if(vals instanceof BigInt64Array || vals instanceof BigUint64Array){
+						let exact = true;
+						for(let i = 0; i < vals.length && exact; ++i)
+							if(!Number.isNaN(rel[i])) exact = (rel[i] === Number(vals[i] - vals[0]));
+						check(exact, `${tag}: re-based int64 doubles are not exact differences`);
+					}
+				}
 			}
 		}
 	}
@@ -264,6 +285,24 @@ async function main()
 			`ex17: time is ${t.semantic}/${t.storage}/${t.units}`);
 		check(t.ops.kind === 'point', `ex17: time ops kind ${t.ops.kind}`);
 		check(t.values() instanceof BigInt64Array, 'ex17: TT2000 values not BigInt64Array');
+		{
+			/* the intended idiom for a time axis: seconds from the first
+			 * sample, as a Float64Array a plotting library takes as is */
+			const big = t.values();
+			const sec = t.doubles({ref: 'first', scale: 1e-9});
+			check(sec[0] === 0 && sec[sec.length - 1] > 0, `ex17: seconds from first sample ${sec[0]}..${sec[sec.length - 1]}`);
+			check(sec[1] === Number(big[1] - big[0]) * 1e-9, 'ex17: scaled seconds not exact');
+			/* an explicit BigInt reference equals 'first' when it is the first
+			 * value, and a small Number reference is widened to a BigInt */
+			const a = t.doubles({ref: big[0]});
+			const rel = t.doubles({ref: 'first'});
+			check(a.length === rel.length && a.every((x, i) => x === rel[i]), 'ex17: BigInt ref differs from first');
+			const c = t.doubles({ref: 5});
+			check(c[0] === Number(big[0] - 5n), 'ex17: Number reference not widened to BigInt');
+			/* and no reference at all rounds to the nearest double, as Number() would */
+			const plain = t.doubles();
+			check(plain[0] === Number(big[0]), 'ex17: plain doubles differ from Number()');
+		}
 		const b = ds.dim('b_tscs').var();
 		check(b.ops.kind === 'vector' && b.ops.system === 'cartesian', `ex17: vector ops ${JSON.stringify(b.ops)}`);
 		check(Array.isArray(b.ops.sysorder) && b.ops.sysorder.join() === '0,1,2', 'ex17: sysorder not parsed to ints');
