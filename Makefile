@@ -6,6 +6,8 @@
 #
 # Targets:
 #
+#   make             build the module and the wasm test programs, run nothing
+#   make test        run the headless node tests: make wasm, then make wasm_test
 #   make wasm        cross-compile libexpat.a and libdas3.a to wasm32, build
 #                    test/TestWasm.c against them, run it under node
 #   make module      the browser deliverable in build.wasm32/: das2c.wasm, its
@@ -23,8 +25,9 @@
 #                    for a browser you drive yourself (PAGE=TestLive.html,
 #                    RUNFLAGS=--dasflex to add the local dasFlex); Ctrl-C stops
 #   make wasm_test   run das2C's own regression suite as wasm under node
-#   make test        native build of the glue plus TestWasm against a native
-#                    deps/das2C, for debugging the glue with ordinary tools
+#   make native      native build of the glue plus TestWasm against a native
+#                    deps/das2C, for debugging the glue with ordinary tools;
+#                    needs gcc and das2C's system libraries, so never a default
 #   make clean
 #
 # The emscripten toolchain must be active in the calling shell (source
@@ -123,11 +126,19 @@ WASM_MOD_LFLAGS=--use-port=zlib -sMODULARIZE=1 -sEXPORT_ES6=1 \
  -sEXPORTED_RUNTIME_METHODS=cwrap,HEAPU8,HEAP32 \
  -Wno-limited-postlink-optimizations
 
+## Default ###################################################################
+
+# A bare make builds the deliverable and the wasm test programs, runs nothing
+all: module $(WBD)/TestWasm.js wasm_test_build
+
+# Everything that runs under node alone: no Firefox, no network
+test: wasm wasm_test
+
 ## Native ####################################################################
 
 # TestWasm reads stream fixtures by paths relative to the das2C checkout, so
 # it runs from there
-test: $(BD)/TestWasm
+native: $(BD)/TestWasm
 	cd $(DAS2C) && $(CURDIR)/$(BD)/TestWasm
 
 $(BD)/TestWasm: test/TestWasm.c glue/wasm.c glue/wasm.h $(DAS2C_LIB) | $(BD)
@@ -196,7 +207,14 @@ inspect: module
 perf: module
 	$(NODE) test/browser/run.mjs Perf.html --serve $(RUNFLAGS)
 
-wasm_test: $(EXPAT_LIB)
+# The prerequisite on DAS2C_WASM_LIB is for make -j: it keeps this from
+# recursing into das2C while the library build is still in there
+wasm_test_build: $(EXPAT_LIB) $(DAS2C_WASM_LIB)
+	$(MAKE) -C $(DAS2C) EMSCRIPTEN=yes EXPAT_INC=$(EXPAT_INC) EXPAT_LIB=$(EXPAT_LIB) build_test
+
+# On wasm_test_build rather than EXPAT_LIB alone so that, under make -j, the
+# library build in das2C is finished before this recursion starts
+wasm_test: wasm_test_build
 	$(MAKE) -C $(DAS2C) EMSCRIPTEN=yes EXPAT_INC=$(EXPAT_INC) EXPAT_LIB=$(EXPAT_LIB) test
 
 ## Housekeeping ##############################################################
@@ -208,4 +226,4 @@ clean:
 	rm -rf build.*
 
 FORCE:
-.PHONY: test wasm module browser live local serve wasm_test clean FORCE
+.PHONY: all test native wasm module browser live local serve inspect perf wasm_test wasm_test_build clean FORCE

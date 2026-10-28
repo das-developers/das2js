@@ -46,14 +46,14 @@ when the run says they are intentional; the success line is the verdict.
 
 | Command          | What it runs                               | Success line                                       |
 |------------------|--------------------------------------------|----------------------------------------------------|
-| `make wasm`      | the C glue test as wasm under Node, ~1 min | `All FFI layer checks passed`                      |
+| `make wasm`      | the C glue test as wasm under Node         | `All FFI layer checks passed`                      |
 | `make browser`   | the module in headless Firefox, fixtures   | `All module checks passed`                         |
 | `make live`      | same, against space.physics.uiowa.edu      | `All live checks passed`                           |
-| `make wasm_test` | das2C's own test suite as wasm, slow       | `All wasm test programs completed without errors`  |
-| `make test`      | the C glue test natively                   | `All FFI layer checks passed`                      |
+| `make wasm_test` | das2C's own test suite as wasm             | `All wasm test programs completed without errors`  |
+| `make test`      | `make wasm`, then `make wasm_test`         | both success lines above                           |
+| `make native`    | the C glue test natively, for gdb/valgrind | `All FFI layer checks passed`                      |
 
-`make live` needs the network.  `make wasm_test` takes several minutes;
-nearly all of it is a test that feeds every fixture one byte at a time.
+`make live` needs the network.  `make wasm_test` takes about 20 seconds.
 
 To open the test page in your own browser instead, run `make serve` and load
 the URL it prints; Ctrl-C stops it.
@@ -74,7 +74,7 @@ After pulling a new das2C, or when in doubt:
     make -C deps/das2C distclean
 
 All three are needed: the native das2C library is only rebuilt when missing,
-so `make test` would otherwise pass against a stale one.
+so `make native` would otherwise pass against a stale one.
 
 ## When something fails
 
