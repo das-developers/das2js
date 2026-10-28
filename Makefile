@@ -68,7 +68,7 @@ EXPAT_LIB=$(CURDIR)/$(WBD)/libexpat.a
 # The three parser sources plus one entropy source.  The entropy choice has
 # to agree with HAVE_GETENTROPY in buildfiles/expat_config.h, the hand-written
 # stand-in for what expat's configure script would have probed.
-EXPAT_SRCS=xmlparse.c xmltok.c xmlrole.c random_getentropy.c
+EXPAT_SRCS=xmlparse.c xmltok.c xmlrole.c random_getentropy.c xcs.c
 EXPAT_OBJS=$(patsubst %.c,$(WBD)/expat_%.o,$(EXPAT_SRCS))
 EXPAT_CFLAGS=-O2 -g -I$(EXPAT_INC) -Ibuildfiles
 
