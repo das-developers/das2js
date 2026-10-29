@@ -28,7 +28,7 @@
 		align-items: center;
 		gap: 1.2em;
 		height: 100%;
-		max-width: 960px;
+		max-width: var(--page);
 		margin: 0 auto;
 		padding: 0 16px;
 	}
@@ -64,7 +64,7 @@
 	a.page span { display: block; margin-top: 0.4em; color: var(--muted); }
 
 	footer {
-		max-width: 960px;
+		max-width: var(--page);
 		margin: 0 auto;
 		padding: 1.2em 16px 2em;
 		border-top: 1px solid var(--line);
@@ -122,7 +122,8 @@
 		<a class="page" href="Perf.html">
 			<strong>Performance</strong>
 			<span>Fetch a live stream, then re-parse the same bytes from memory,
-			so parser time shows separately from the network.</span>
+			so parser time shows separately from the network.  From a quick
+			test to a 505 MB day that hammers your browser.</span>
 		</a>
 	</div>
 </main>

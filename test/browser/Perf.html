@@ -6,12 +6,69 @@
 <title>das2js performance</title>
 <link rel="stylesheet" href="style.css">
 <style>
+	/* Room for the twelve column table; the bar above follows */
+	:root { --page: 1280px; }
 	input[type=text] { width: min(44em, 100%); }
 	input[type=number] { width: 4.5em; }
 	#status { margin: 0.5em 0; }
 	td:first-child, th:first-child { text-align: left; }
+	/* Once a run finishes, Perf.mjs adds .finished and the parse ms column
+	 * (the 7th) turns button gold to draw the eye to the parser's time */
+	#results.finished td:nth-child(7) { color: var(--gold); font-weight: 600; }
 	#datasets { font-size: 90%; }
 	.err { white-space: pre-wrap; }
+	/* Button then its description, one preset per row */
+	.presets {
+		display: grid;
+		grid-template-columns: max-content 1fr;
+		gap: 0.6em 1em;
+		align-items: center;
+		margin-bottom: 1.2em;
+	}
+	.presets span { color: var(--muted); }
+	/* Progress bar: kept quiet in the column headers' grey-blue so the gold
+	 * parse ms column stays the one thing that draws the eye.  The faint
+	 * stripes are a 20 px tile of diagonal bands; sliding the tile by its
+	 * own width loops seamlessly. */
+	.progress { display: flex; align-items: center; gap: 1em; margin: 0.4em 0 0.8em; }
+	.progress[hidden] { display: none; }
+	.progress .track {
+		flex: 1;
+		max-width: 44em;
+		height: 14px;
+		background: var(--code);
+		border: 1px solid var(--line);
+		border-radius: 7px;
+		overflow: hidden;
+	}
+	.progress .fill {
+		width: 0;
+		height: 100%;
+		border-radius: 7px;
+		background-color: var(--muted);
+		background-image:
+			linear-gradient(-45deg, rgba(255,255,255,0.14) 25%, transparent 25%,
+				transparent 50%, rgba(255,255,255,0.14) 50%,
+				rgba(255,255,255,0.14) 75%, transparent 75%);
+		background-size: 20px 20px;
+		animation: crawl 0.7s linear infinite;
+		transition: width 0.066s linear;
+	}
+	@keyframes crawl { to { background-position: 20px 0; } }
+	/* Size unknown: a short bar sweeping back and forth */
+	.progress.unknown .fill {
+		width: 25%;
+		animation: crawl 0.7s linear infinite, sweep 1.4s ease-in-out infinite alternate;
+	}
+	@keyframes sweep { from { margin-left: 0; } to { margin-left: 75%; } }
+	/* Done: solid, stripes stop */
+	.progress.complete .fill { background-image: none; animation: none; }
+	.progress.failed .fill { background-image: none; background-color: var(--err); animation: none; }
+	.progress .label { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+	@media (prefers-reduced-motion: reduce) {
+		.progress .fill { animation: none; }
+		.progress.unknown .fill { width: 100%; opacity: 0.5; }
+	}
 	/* Twelve columns: scroll sideways rather than squeeze on a phone */
 	.scroll { overflow-x: auto; }
 </style>
@@ -22,12 +79,24 @@
 <h1>Performance</h1>
 <p>Fetch a real stream, then re-parse the same bytes from memory to separate
 the parser from the network.  Times are wall-clock milliseconds.</p>
+<div class="presets">
+	<button type="button" id="quick">Quick test</button>
+	<span>Juno Waves survey spectra for Perijove 16 at display resolution:
+	about 1.75 MB of das2 stream data, done in under a second.  3 re-parses.</span>
+	<button type="button" id="hammer">Hammer my browser</button>
+	<span>All Perijove 35 Juno Waves burst waveforms: 126,199,864 values and 1.5 GB of browser memory.  Watch the counter.
+	1 re-parse.</span>
+</div>
 <form id="form">
 	<input type="text" id="url" placeholder="stream URL">
 	re-parse <input type="number" id="reps" value="3" min="0" max="20"> times
 	<button type="submit">Run</button>
 </form>
 <p id="status"></p>
+<div id="progress" class="progress" hidden>
+	<div class="track"><div class="fill"></div></div>
+	<span class="label"></span>
+</div>
 <p id="datasets"></p>
 <div class="scroll">
 <table id="results">

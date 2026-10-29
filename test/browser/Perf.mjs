@@ -18,9 +18,12 @@
  * which is the zero-copy promise made good.  Heap MB is the wasm heap
  * after the run; it only grows, so repeated runs show the high-water mark.
  *
- * ?url=... bookmarks a stream and ?reps=N sets the re-parse count.  The
- * first run posts a verdict to the node
- * runner when one is driving, so this page doubles as a network test. */
+ * Nothing runs until a button is pressed: the two presets, or Run for the
+ * stream in the URL box.  All three are disabled while a run is going, so
+ * runs never overlap.  ?url=... and ?reps=N fill in the form.
+ *
+ * Each run's rows and verdict are also posted to the node runner, so they
+ * show in the terminal running make server. */
 
 import {load, DasError} from '/build/das2js.mjs';
 
@@ -29,12 +32,33 @@ const urlBox = document.getElementById('url');
 const repsBox = document.getElementById('reps');
 const status = document.getElementById('status');
 const datasetsLine = document.getElementById('datasets');
-const tbody = document.querySelector('#results tbody');
+const table = document.getElementById('results');
+const tbody = table.querySelector('tbody');
 const errBox = document.getElementById('err');
 
-/* Juno Waves survey, two days at 86.4 s bins, anonymous at Iowa */
-const DEFAULT_URL = 'https://space.physics.uiowa.edu/das/stream/source/juno/wav/survey/flex'
-	+ '?read.time.min=2018-10-02T11%3A00&read.time.max=2018-10-04T11%3A00&bin.time.max=86.4';
+/* The two preset buttons.  Both sources are anonymous at Iowa.
+ *
+ * quick: Juno Waves survey for Perijove 16 at display resolution (1 minute
+ *   averages), about 1.75 MB of das2 stream: float values, text times.
+ *   From the das2py-server at jupiter.physics.uiowa.edu, whose stream cache
+ *   answers in well under a second.
+ * hammer: Juno Waves burst waveforms for 2021-07-21, about 505 MB of das3
+ *   binary floats, so one re-parse is plenty.  It leaves about 1.5 GB of
+ *   the 2 GB wasm heap in use. */
+const PRESETS = {
+	quick: {
+		url: 'https://jupiter.physics.uiowa.edu/das/server?server=dataset&dataset=Juno/WAV/Survey'
+			+ '&start_time=2018-10-02T11:00&end_time=2018-10-04T11:00&resolution=60',
+		reps: 3,
+		bytes: 1754139,
+	},
+	hammer: {
+		url: 'https://space.physics.uiowa.edu/das/stream/source/juno/wav/burst_waveforms/flex'
+			+ '?read.time.min=2021-07-21&read.time.max=2021-07-22',
+		reps: 1,
+		bytes: 505305959,
+	},
+};
 
 const REPARSE_CHUNK = 65536;
 
@@ -84,6 +108,61 @@ function row(cells)
 	tbody.appendChild(tr);
 }
 
+/* The progress bar under the status line.  It goes by bytes, not stream
+ * time, using the presets' known sizes.  das servers can't send a
+ * Content-Length (how much they send depends on the data), so any other URL
+ * gets a bar that sweeps back and forth while the byte count climbs.
+ *
+ * The bar's label has the percentage and rate.  Megabytes here are 10^6
+ * bytes, to match the "505 MB" on the buttons.
+ *
+ * The bar is redrawn at most 15 times a second: a CSS transition of the
+ * same length glides it between redraws.  The moving stripes are CSS
+ * animation, see Perf.html.  The byte counter on the status line is not
+ * throttled, see streamingRun(). */
+const BAR_MS = 66;
+const bar = document.getElementById('progress');
+const fill = bar.querySelector('.fill');
+const label = bar.querySelector('.label');
+let barExpected = null;
+let barT0 = 0;
+let barDrawn = 0;
+
+function barBegin(expected)
+{
+	barExpected = expected;
+	barT0 = performance.now();
+	barDrawn = 0;
+	bar.hidden = false;
+	bar.className = 'progress' + (expected ? '' : ' unknown');
+	fill.style.width = expected ? '0%' : '';
+	label.textContent = 'waiting for the server...';
+}
+
+function barUpdate(bytes, force)
+{
+	const now = performance.now();
+	if(!force && now - barDrawn < BAR_MS) return;
+	barDrawn = now;
+
+	const rate = (bytes / 1e6) / Math.max(0.001, (now - barT0) / 1000);
+	if(barExpected){
+		/* Math.min: a stream that grew since the size was noted stops at full */
+		const pct = Math.min(100, 100 * bytes / barExpected);
+		fill.style.width = pct.toFixed(1) + '%';
+		label.textContent = `${pct.toFixed(0)}%, ${rate.toFixed(1)} MB/s`;
+	}
+	else
+		label.textContent = `${rate.toFixed(1)} MB/s`;
+}
+
+function barEnd(ok, note)
+{
+	bar.className = 'progress ' + (ok ? 'complete' : 'failed');
+	if(ok) fill.style.width = '100%';
+	if(note) label.textContent = note;
+}
+
 async function streamingRun(url)
 {
 	const t0 = performance.now();
@@ -102,7 +181,12 @@ async function streamingRun(url)
 			chunks.push(value);
 			bytes += value.length;
 			rdr.feed(value);
+			/* Every chunk, as fast as they come.  Setting text only stores a
+			 * string; the browser draws at most once per screen refresh, so
+			 * the counter shows a new number on every frame and the low
+			 * digits blur.  The bar throttles itself. */
 			status.textContent = `${bytes} bytes...`;
+			barUpdate(bytes, false);
 			/* the two progressive milestones, checked cheaply per chunk */
 			const s = rdr.stream;
 			if(s !== null && s.length > 0){
@@ -115,6 +199,7 @@ async function streamingRun(url)
 	}
 	catch(e){ rdr.free(); throw e; }
 	const wall = performance.now() - t0;
+	barUpdate(bytes, true);
 	const strm = rdr.take();
 	rdr.free();
 
@@ -143,13 +228,18 @@ function reparseRun(all)
 	finally{ rdr.free(); }
 }
 
-async function run(url, reps, verdict)
+async function run(url, reps, verdict, expected)
 {
 	errBox.textContent = '';
 	tbody.replaceChildren();
+	table.classList.remove('finished');
 	datasetsLine.textContent = '';
+	status.textContent = 'streaming...';
+	barBegin(expected);
 	try{
 		const r = await streamingRun(url);
+		barEnd(true, `${(r.bytes / 1e6).toFixed(1)} MB in ${(r.wall / 1000).toFixed(1)} s, `
+			+ `${(r.bytes / 1e6 / (r.wall / 1000)).toFixed(1)} MB/s`);
 		const records = recordCount(r.strm);
 		const view = viewAll(r.strm);
 		const names = Array.from(r.strm.datasets(), ds => `${ds.name} [${ds.shape.join(',')}]`);
@@ -172,10 +262,14 @@ async function run(url, reps, verdict)
 			status.textContent = `re-parse ${i} of ${reps} done`;
 		}
 		status.textContent = `done: ${r.bytes} bytes, ${records} records, wall ${r.wall.toFixed(0)} ms`;
+		/* Lights up the parse ms column, see Perf.html; only a run that got
+		 * this far earns it, a failure leaves the table plain */
+		table.classList.add('finished');
 		if(verdict) report(`INFO: perf: ${r.bytes} bytes, ${records} records in ${r.wall.toFixed(0)} ms wall from ${url}`, true);
 	}
 	catch(e){
 		status.textContent = 'failed';
+		barEnd(false, 'failed');
 		errBox.textContent = (e instanceof DasError)
 			? `${e.message}${e.exception ? '\nserver said: ' + e.exception : ''}`
 			: `${e.name}: ${e.message}`;
@@ -183,16 +277,41 @@ async function run(url, reps, verdict)
 	}
 }
 
-form.addEventListener('submit', ev => {
-	ev.preventDefault();
+/* Every control that starts a run, so they can all be switched off at once */
+const starters = [
+	document.getElementById('quick'),
+	document.getElementById('hammer'),
+	form.querySelector('button[type=submit]'),
+];
+
+/* Runs the stream in the form.  The buttons stay disabled until run()
+ * settles, whether it succeeded or threw; "finally" covers both. */
+async function start()
+{
 	const url = urlBox.value.trim();
 	if(url === '') return;
 	history.replaceState(null, '', '?url=' + encodeURIComponent(url));
-	run(url, Number(repsBox.value), false);
+	for(const b of starters) b.disabled = true;
+	/* A preset's size drives the bar; any other URL gets the sweeping one */
+	const preset = Object.values(PRESETS).find(p => p.url === url);
+	try{ await run(url, Number(repsBox.value), true, preset ? preset.bytes : null); }
+	finally{ for(const b of starters) b.disabled = false; }
+}
+
+form.addEventListener('submit', ev => {
+	ev.preventDefault();   /* a submit would otherwise reload the page */
+	start();
 });
 
+for(const name of ['quick', 'hammer']){
+	document.getElementById(name).addEventListener('click', () => {
+		urlBox.value = PRESETS[name].url;
+		repsBox.value = PRESETS[name].reps;
+		start();
+	});
+}
+
 const params = new URLSearchParams(location.search);
-const initial = params.get('url') || DEFAULT_URL;
+urlBox.value = params.get('url') || PRESETS.quick.url;
 if(params.has('reps')) repsBox.value = params.get('reps');
-urlBox.value = initial;
-run(initial, Number(repsBox.value), true);
+status.textContent = 'Pick a test, or enter a stream URL and press Run.';

@@ -15,6 +15,9 @@
 	--blue:   #5aa9ff;
 	--code:   #0a1124;
 	--err:    #ff7a6b;
+
+	/* Width of the content column; a page with wide tables raises it */
+	--page:   960px;
 }
 
 * { box-sizing: border-box; }
@@ -29,7 +32,7 @@ body {
 a { color: var(--blue); }
 
 /* Page column; the index's header and footer reuse the width */
-main { max-width: 960px; margin: 0 auto; padding: 0 16px 2em; }
+main { max-width: var(--page); margin: 0 auto; padding: 0 16px 2em; }
 
 h1 {
 	margin: 0.8em 0 0.3em;
@@ -51,7 +54,7 @@ nav.bar {
 	border-bottom: 1px solid var(--line);
 	background: var(--panel);
 }
-nav.bar div { max-width: 960px; margin: 0 auto; padding: 0.55em 16px; }
+nav.bar div { max-width: var(--page); margin: 0 auto; padding: 0.55em 16px; }
 nav.bar a { color: var(--gold); text-decoration: none; font-weight: 600; }
 nav.bar a:hover { text-decoration: underline; }
 
@@ -90,6 +93,7 @@ button {
 	cursor: pointer;
 }
 button:hover { filter: brightness(1.1); }
+button:disabled { opacity: 0.4; cursor: not-allowed; filter: none; }
 
 table { border-collapse: collapse; margin-top: 1em; }
 th, td {

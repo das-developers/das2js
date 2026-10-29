@@ -76,6 +76,18 @@ against the dasFlex server at space.physics.uiowa.edu:
 | Juno Waves burst waveforms, 1 day       |   505 MB | 37.0 s |       466 ms |   330 ms | 1460 |
 | same stream, in a Firefox window        |   505 MB | 36.3 s |       506 ms |   288 ms | 1673 |
 
+The streams measured, the burst one being the page's Hammer my browser
+preset:
+
+    https://space.physics.uiowa.edu/das/stream/source/juno/wav/survey/flex?read.time.min=2018-10-02T11%3A00&read.time.max=2018-10-04T11%3A00&bin.time.max=86.4
+    https://space.physics.uiowa.edu/das/stream/source/juno/wav/burst_waveforms/flex?read.time.min=2021-07-21&read.time.max=2021-07-22
+
+The Quick test preset asks for the same survey days from the das2py-server
+at jupiter.physics.uiowa.edu instead, at 1 minute display resolution: 1.75
+MB in about 0.3 s from its stream cache, which the new server lacks so far.
+
+    https://jupiter.physics.uiowa.edu/das/server?server=dataset&dataset=Juno/WAV/Survey&start_time=2018-10-02T11:00&end_time=2018-10-04T11:00&resolution=60
+
 Wall time is dominated by the server: the burst day took `curl` the same
 36 s, so parsing inside the download is free, and a progressive display can
 start drawing half a second after the request.  The burst stream is
