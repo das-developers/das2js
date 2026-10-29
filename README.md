@@ -10,14 +10,13 @@ parsing and value decoding happen in C and JavaScript receives typed-array
 views of the decoded values without a conversion pass.
 
 
-**Early days, but it runs.**  `make module` produces a three-file ES module
+**Early days, but it runs.**  `make` produces a three-file ES module
 in `build.wasm32/` (`das2js.mjs`, `das2c.mjs`, `das2c.wasm`) that fetches a
-das stream, parses it as it arrives, and hands back TypedArray views of the
-decoded values, int64 and all, plus a one-call exact conversion of an int64
-time axis to plot-ready doubles.  It has read real data from a public dasFlex
-server in Firefox.  No package, no minified build, no catalog browser, no
-plotting; a progress meter, a source picker, a catalog tree view and a
-live spectrogram are the planned demos.  Layout:
+das stream, parses it as it arrives, and hands back decoded values, int64 and 
+all.  It has read real data from a public dasFlex server in Firefox.  No package,
+no minified build, no catalog browser, no plotting; a progress meter, a source
+picker, a catalog tree view and a live spectrogram are the planned demos. 
+Layout:
 
   * `src/` - the hand-written ES module, one file
   * `glue/` - a small flat C interface over das2C, the wasm export surface
@@ -32,8 +31,8 @@ samples, parses in Firefox in under 300 ms once the bytes are in memory,
 about 1.7 GB/s, and the first record is usable half a second after the
 request goes out while the server spends the next 36 s producing the rest.
 No JSON on the wire, no number conversion in JavaScript: the values arrive
-in their native binary encoding and the browser reads them where they
-landed.  Screenshot of the live run below. Method and more streams in 
+in their native binary encoding and the browser reads them as they are.  
+Screenshot of the live run below. Method and more streams in 
 [notes/performance.md](notes/performance.md).
 
 ![notes/hammer_perf.png](notes/hammer_perf.png)
@@ -47,8 +46,3 @@ fetches the pinned sources.
 This repository was started in 2022 and promptly went dormant.  It is active
 again as of October 2026, though if you need a working das client today,
 das2py is the mature path and this is not yet an alternative.
-
-#TODO
-Todo Add build instructions here.
-* mention that -j shouldn't be used on NFS mounted filesystems with emsdk,
-not a paragraph, just a sentence.
