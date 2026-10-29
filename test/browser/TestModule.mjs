@@ -6,13 +6,18 @@
  *
  * Reporting goes two ways at once: into the page (so a human loading the
  * page sees something) and to the runner over POST (so make sees the
- * result).  The runner is optional; when the page is opened from a plain
- * static server the POSTs fail quietly and the page still works. */
+ * result).  The runner is optional; served from anywhere else the page
+ * skips the POSTs and still works. */
 
-import {load, DasError} from '/build/das2js.mjs';
+import {load, DasError} from '../build/das2js.mjs';
 
 const out = document.getElementById('out');
 let failed = false;
+
+/* The node runner (make server, headless tests) listens on 127.0.0.1 only,
+ * so any other host is a plain web server with no /log or /done.  Skip the
+ * POSTs there rather than leave a 404 in its access log per line. */
+const RUNNER = location.hostname === '127.0.0.1';
 
 /* POSTs are chained so lines reach the runner in the order logged; fired
  * independently they race and interleave */
@@ -20,7 +25,8 @@ let queue = Promise.resolve();
 function log(line)
 {
 	out.textContent += line + '\n';
-	queue = queue.then(() => fetch('/log', {method: 'POST', body: line})).catch(() => {});
+	if(RUNNER)
+		queue = queue.then(() => fetch('/log', {method: 'POST', body: line})).catch(() => {});
 }
 
 function check(cond, msg)
@@ -35,6 +41,7 @@ function check(cond, msg)
 async function done()
 {
 	log(failed ? 'ERROR: module test FAILED' : 'INFO: All module checks passed');
+	if(!RUNNER) return;
 	try{
 		await queue;   /* every log line first, then the verdict */
 		await fetch('/done', {method: 'POST', body: JSON.stringify({pass: !failed})});
@@ -46,14 +53,14 @@ async function done()
  * strings, a das2 text stream exercising up-conversion and das_time, and a
  * ragged waveform for the partial-index access */
 const FIXTURES = [
-	'/das2C/examples/ex17_vector_noframe.d3b',
-	'/das2C/examples/ex35_strings_rank2.d3b',
-	'/das2C/examples/ex01_polar_mfe.d2t',
-	'/das2C/examples/ex19_cassini_ragged_wfrm.d3t',
+	'../das2C/examples/ex17_vector_noframe.d3b',
+	'../das2C/examples/ex35_strings_rank2.d3b',
+	'../das2C/examples/ex01_polar_mfe.d2t',
+	'../das2C/examples/ex19_cassini_ragged_wfrm.d3t',
 	/* two multi-dataset das2 streams whose packet headers arrive AFTER data
 	 * packets for earlier ids, the Juno/WAV/Survey shape */
-	'/das2C/examples/ex08_cassini_rpws_survey.d2t',
-	'/das2C/examples/ex09_juno_waves_survey.d2t',
+	'../das2C/examples/ex08_cassini_rpws_survey.d2t',
+	'../das2C/examples/ex09_juno_waves_survey.d2t',
 ];
 
 const SEMANTICS = new Set(['bool', 'datetime', 'integer', 'real', 'string', 'blob']);
@@ -340,7 +347,7 @@ async function main()
 	 * count each time records exist; it must still be climbing after the
 	 * first records have landed. */
 	{
-		const resp = await fetch('/das2C/examples/ex08_cassini_rpws_survey.d2t');
+		const resp = await fetch('../das2C/examples/ex08_cassini_rpws_survey.d2t');
 		const bytes = new Uint8Array(await resp.arrayBuffer());
 		const rdr = d.newReader();
 		let countWhenFirstRecords = -1;
@@ -357,6 +364,44 @@ async function main()
 			`ex08: dataset count ${finalCount} did not grow after records arrived (was ${countWhenFirstRecords})`);
 		log(`INFO: late headers: ${countWhenFirstRecords} dataset(s) when records began, ${finalCount} at end`);
 		rdr.free();
+	}
+
+	/* Painting through DasRender: the same late-header stream, fed in
+	 * chunks with a renderer attached.  The image is fetched mid-stream and
+	 * again at the end; the heap grows in between, so the second
+	 * imageData() would come back empty if it reused a stale view. */
+	{
+		const resp = await fetch('../das2C/examples/ex08_cassini_rpws_survey.d2t');
+		const bytes = new Uint8Array(await resp.arrayBuffer());
+		const rdr = d.newReader();
+		const ren = d.newRender(800, 232);
+		ren.setX('2017-01-01T02:40', '2017-01-01T06:00');
+		ren.attach(rdr);
+		check(ren.kind === 'none', `render: kind '${ren.kind}' before any header`);
+		let midImage = null;
+		for(let i = 0; i < bytes.length; i += 4093){
+			rdr.feed(bytes.subarray(i, i + 4093));
+			if(midImage === null && ren.dirty) midImage = ren.imageData();
+		}
+		rdr.end();
+		check(midImage !== null, 'render: never dirty mid-stream');
+		check(ren.kind === 'spectrogram', `render: kind '${ren.kind}', want spectrogram`);
+		const img = ren.imageData();
+		check(img.width === 800 && img.height === 232 && img.data.length === 800*232*4, 'render: image size');
+		let lit = 0;
+		for(let p = 0; p < img.data.length; p += 4)
+			if(img.data[p] | img.data[p+1] | img.data[p+2]) ++lit;
+		check(lit > 800*232/4, `render: only ${lit} pixels painted`);
+		check(img.data[3] === 255, 'render: alpha not opaque');
+		const y = ren.axis(false);
+		check(y.min < y.max && y.units === 'Hz', `render: y axis ${JSON.stringify(y)}`);
+		let threw = false;
+		try{ ren.setX('2017-01-01', '2017-01-02'); }
+		catch(e){ threw = (e instanceof DasError); }
+		check(threw, 'render: setX after data was accepted');
+		log(`INFO: render: ${lit} pixels painted, ${ren.rescales} rescale(s), ${ren.paintMs.toFixed(1)} ms`);
+		rdr.free();   /* reader first, it points at the renderer */
+		ren.free();
 	}
 
 	/* Error path: garbage must throw a DasError carrying a message */
@@ -376,7 +421,7 @@ async function main()
 	/* HTTP failure path */
 	{
 		let threw = false;
-		try{ await d.fetchStream('/das2C/examples/no_such_file.d3b'); }
+		try{ await d.fetchStream('../das2C/examples/no_such_file.d3b'); }
 		catch(e){ threw = (e instanceof DasError); }
 		check(threw, '404 did not surface as DasError');
 	}

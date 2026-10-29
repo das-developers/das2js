@@ -160,6 +160,13 @@ void del_DasWasmRdr(DasWasmRdr* pThis)
 	free(pThis);
 }
 
+int DasWasmRdr_addProcessor(DasWasmRdr* pThis, StreamHandler* pProc)
+{
+	/* DasIO_addProcessor returns a slot count or a negated error */
+	int nRet = DasIO_addProcessor(pThis->pIo, pProc);
+	return (nRet < 0) ? -nRet : DAS_OKAY;
+}
+
 void daswasm_stream_free(DasStream* pSd){ del_DasStream(pSd); }
 
 /* ************************************************************************* */

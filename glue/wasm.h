@@ -186,6 +186,21 @@ DAS_WASM_API const char* DasWasmRdr_exception(const DasWasmRdr* pThis);
  */
 DAS_WASM_API void del_DasWasmRdr(DasWasmRdr* pThis);
 
+/** Hook another stream processor onto the reader, after the dataset builder.
+ *
+ * For C modules linked into the same program, src/render.c first among
+ * them.  Not exported: a foreign runtime has no way to build a
+ * StreamHandler.  Call before the first DasWasmRdr_feed(); a processor
+ * that misses the dataset headers can't make sense of the data.
+ *
+ * The reader keeps the pointer, so the handler must outlive the reader or
+ * at least its last feed.
+ *
+ * @returns 0 (DAS_OKAY) or a positive error code
+ * @memberof DasWasmRdr
+ */
+int DasWasmRdr_addProcessor(DasWasmRdr* pThis, StreamHandler* pProc);
+
 /** Free a stream previously detached with DasWasmRdr_take() */
 DAS_WASM_API void daswasm_stream_free(DasStream* pSd);
 

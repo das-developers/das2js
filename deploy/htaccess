@@ -1,0 +1,8 @@
+# Apache settings for a make dist tree.  Needs "AllowOverride FileInfo" in
+# the server config for the AddType lines, or the server answers 500.
+
+# WebAssembly.instantiateStreaming refuses a .wasm served as anything else,
+# and browsers refuse to run a module script sent under a generic type.
+# Not every server's mime.types file lists them, so say so here.
+AddType application/wasm .wasm
+AddType text/javascript .mjs

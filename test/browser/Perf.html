@@ -14,7 +14,7 @@
 	td:first-child, th:first-child { text-align: left; }
 	/* Once a run finishes, Perf.mjs adds .finished and the parse ms column
 	 * (the 7th) turns button gold to draw the eye to the parser's time */
-	#results.finished td:nth-child(7) { color: var(--gold); font-weight: 600; }
+	#results.finished td:nth-child(9) { color: var(--gold); font-weight: 600; }
 	#datasets { font-size: 90%; }
 	.err { white-space: pre-wrap; }
 	/* Button then its description, one preset per row */
@@ -26,6 +26,9 @@
 		margin-bottom: 1.2em;
 	}
 	.presets span { color: var(--muted); }
+	/* The hammer's memory warning: brighter than the muted blurb around it,
+	 * but not the error red, it's advice, not a failure */
+	.presets em { color: var(--text); font-style: normal; }
 	/* Progress bar: kept quiet in the column headers' grey-blue so the gold
 	 * parse ms column stays the one thing that draws the eye.  The faint
 	 * stripes are a 20 px tile of diagonal bands; sliding the tile by its
@@ -69,7 +72,43 @@
 		.progress .fill { animation: none; }
 		.progress.unknown .fill { width: 100%; opacity: 0.5; }
 	}
-	/* Twelve columns: scroll sideways rather than squeeze on a phone */
+	/* The painted data.  The drawing buffer is sized at run start from the
+	 * on-screen width, see Perf.mjs; CSS only keeps the shape. */
+	#paint {
+		display: block;
+		width: 100%;
+		aspect-ratio: 800 / 232;
+		background: #000;
+		border: 1px solid var(--line);
+	}
+	#paint[hidden] { display: none; }
+	#paintNote { font-size: 90%; color: var(--muted); margin: 0.3em 0 0.8em; }
+	/* The headline numbers under the table: label, big value, note */
+	.summary {
+		background: var(--panel);
+		border: 1px solid var(--line);
+		border-radius: 6px;
+		padding: 0.8em 1.2em;
+		margin: 1em 0;
+	}
+	.summary[hidden] { display: none; }
+	.summary dl {
+		display: grid;
+		grid-template-columns: max-content 1fr;
+		gap: 0.45em 1.2em;
+		margin: 0;
+		align-items: baseline;
+	}
+	.summary dt { color: var(--muted); }
+	.summary dd { margin: 0; }
+	.summary strong {
+		color: var(--gold);
+		font-size: 130%;
+		font-variant-numeric: tabular-nums;
+		margin-right: 0.8em;
+	}
+	.summary span { color: var(--muted); font-size: 90%; }
+	/* Fourteen columns: scroll sideways rather than squeeze on a phone */
 	.scroll { overflow-x: auto; }
 </style>
 </head>
@@ -78,14 +117,20 @@
 <main>
 <h1>Performance</h1>
 <p>Fetch a real stream, then re-parse the same bytes from memory to separate
-the parser from the network.  Times are wall-clock milliseconds.</p>
+the parser from the network.  Times are wall-clock milliseconds.  While the
+stream arrives each packet is painted into the black box as it is parsed;
+paint ms is that time, and it is part of the wall time.  Each re-parse is
+followed by a parse+paint pass over the same bytes, with the painting time
+split out.</p>
 <div class="presets">
 	<button type="button" id="quick">Quick test</button>
 	<span>Juno Waves survey spectra for Perijove 16 at display resolution:
 	about 1.75 MB of das2 stream data, done in under a second.  3 re-parses.</span>
 	<button type="button" id="hammer">Hammer my browser</button>
-	<span>All Perijove 35 Juno Waves burst waveforms: 126,199,864 values and 1.5 GB of browser memory.  Watch the counter.
-	1 re-parse.</span>
+	<span>All Perijove 35 Juno Waves burst waveforms: 126,199,864 values and
+	1.5 GB of browser memory.  Watch the counter.  1 re-parse.
+	<em>Downloads half a gigabyte.  Your phone might say no, along with the
+	conference wi-fi.  Don't run on a metered connection.</em></span>
 </div>
 <form id="form">
 	<input type="text" id="url" placeholder="stream URL">
@@ -97,18 +142,22 @@ the parser from the network.  Times are wall-clock milliseconds.</p>
 	<div class="track"><div class="fill"></div></div>
 	<span class="label"></span>
 </div>
+<canvas id="paint" width="800" height="232" hidden></canvas>
+<p id="paintNote"></p>
 <p id="datasets"></p>
 <div class="scroll">
 <table id="results">
 	<thead><tr>
 		<th>run</th><th>bytes</th><th>chunks</th><th>wall ms</th>
 		<th>first header ms</th><th>first record ms</th>
+		<th>first pixel ms</th><th>paint ms</th>
 		<th>parse ms</th><th>MB/s</th><th>records</th><th>records/s</th>
 		<th>view all vars ms</th><th>heap MB</th>
 	</tr></thead>
 	<tbody></tbody>
 </table>
 </div>
+<div id="summary" class="summary" hidden></div>
 <pre id="err" class="err"></pre>
 </main>
 <script type="module" src="./Perf.mjs"></script>

@@ -9,10 +9,15 @@
  * live_test` for the public one over the network, `make local_test` for the
  * dasFlex checkout next door through the CGI shim. */
 
-import {load, DasError} from '/build/das2js.mjs';
+import {load, DasError} from '../build/das2js.mjs';
 
 const out = document.getElementById('out');
 let failed = false;
+
+/* The node runner (make server, headless tests) listens on 127.0.0.1 only,
+ * so any other host is a plain web server with no /log or /done.  Skip the
+ * POSTs there rather than leave a 404 in its access log per line. */
+const RUNNER = location.hostname === '127.0.0.1';
 
 /* POSTs are chained so lines reach the runner in the order logged; fired
  * independently they race and interleave */
@@ -20,7 +25,8 @@ let queue = Promise.resolve();
 function log(line)
 {
 	out.textContent += line + '\n';
-	queue = queue.then(() => fetch('/log', {method: 'POST', body: line})).catch(() => {});
+	if(RUNNER)
+		queue = queue.then(() => fetch('/log', {method: 'POST', body: line})).catch(() => {});
 }
 
 function check(cond, msg)
@@ -32,6 +38,7 @@ function check(cond, msg)
 async function done()
 {
 	log(failed ? 'ERROR: live test FAILED' : 'INFO: All live checks passed');
+	if(!RUNNER) return;
 	try{
 		await queue;   /* every log line first, then the verdict */
 		await fetch('/done', {method: 'POST', body: JSON.stringify({pass: !failed})});

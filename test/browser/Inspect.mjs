@@ -6,23 +6,28 @@
  * nothing here knows the dataset model.  The URL comes from the form or
  * from ?url=... so a stream can be bookmarked. */
 
-import {load, DasError} from '/build/das2js.mjs';
+import {load, DasError} from '../build/das2js.mjs';
 
 const out = document.getElementById('out');
 const status = document.getElementById('status');
 const urlBox = document.getElementById('url');
 
-const DEFAULT_URL = '/das2C/examples/ex17_vector_noframe.d3b';
+const DEFAULT_URL = '../das2C/examples/ex17_vector_noframe.d3b';
 
 /* Anonymous for data older than six months, so a bookmarkable live example */
 const EXAMPLE_LIVE = 'https://space.physics.uiowa.edu/das/stream?server=dataset'
 	+ '&dataset=Juno/WAV/Survey&start_time=2017-01-01T13:00&end_time=2017-01-01T14:00';
 
 /* When the node runner is driving (make server, or a headless check), the
- * first load's verdict is posted back like the test pages do; with a plain
- * static server the POSTs fail quietly. */
+ * first load's verdict is posted back like the test pages do. */
+/* The node runner (make server, headless tests) listens on 127.0.0.1 only,
+ * so any other host is a plain web server with no /log or /done.  Skip the
+ * POSTs there rather than leave a 404 in its access log per line. */
+const RUNNER = location.hostname === '127.0.0.1';
+
 function report(line, pass)
 {
+	if(!RUNNER) return;
 	fetch('/log', {method: 'POST', body: line}).catch(() => {});
 	if(pass !== undefined)
 		fetch('/done', {method: 'POST', body: JSON.stringify({pass})}).catch(() => {});

@@ -92,9 +92,24 @@ Wall time is dominated by the server: the burst day took `curl` the same
 36 s, so parsing inside the download is free, and a progressive display can
 start drawing half a second after the request.  The burst stream is
 little-endian floats, which the parser copies at memory speed; the survey
-is a das2 stream with text in it.  The last row is the page as it looks
-after the burst run, [jno_wav_burst_perf.png](jno_wav_burst_perf.png);
-viewing all 126 million elements costs 1 ms because the views are not copies.
+is a das2 stream with text in it.  Viewing all 126 million elements costs
+about 1 ms because the views are not copies.
+
+### Painting while it downloads
+
+Since 2026-10-29 the page also paints each packet into a raster as it is
+parsed (src/render.c), and each re-parse is followed by a parse+paint pass
+from memory.  [hammer_perf.png](hammer_perf.png) is the burst run in a
+Firefox window that day:
+
+* The first pixel showed at 740 ms, 67 ms after the first record.
+* Painting took 4.6 s of the 38.4 s download, so it still hides inside the
+  network time.
+* The painter ran at 44 M values/s.  That counts the 201.7 M values it
+  painted, including the repaints for 4 rescales, not just the 126 M in
+  the stream.
+* Parse+paint from memory took 4.8 s, 8 times faster than the network
+  delivered the stream.  Parsing alone took 0.23 s.
 
 Memory: the parsed burst day occupied 1.5 GB of WebAssembly heap for 505 MB
 of values, because arrays grow by doubling and the heap never shrinks.
@@ -107,10 +122,11 @@ The three files from `make module`:
 
 | file         |     raw | gzip -9 |
 |--------------|--------:|--------:|
-| `das2c.wasm` |  453 KB |  183 KB |
-| `das2c.mjs`  |   26 KB |    7 KB |
-| `das2js.mjs` |   31 KB |   11 KB |
+| `das2c.wasm` |  495 KB |  202 KB |
+| `das2c.mjs`  |   19 KB |    6 KB |
+| `das2js.mjs` |   47 KB |   16 KB |
 
-The `.wasm` holds das2C, the expat XML parser, zlib and the C library.
+The `.wasm` holds das2C, the expat XML parser, zlib, the C library and the
+raster painter.  Sizes as of 2026-10-29.
 A `make module DEBUG=yes` build keeps the C debug information and is about
 five times larger; don't deploy that one.

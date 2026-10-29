@@ -1,0 +1,9 @@
+
+# Basic auth, appended by make dist HTPASSWD=...  It keeps out the casual
+# visitor and crawlers, not anyone determined.  Needs "AllowOverride
+# AuthConfig" as well.  Same-origin fetches and module imports resend the
+# credentials on their own, so the pages need no changes for it.
+AuthType Basic
+AuthName "das2js test pages"
+AuthUserFile @HTPASSWD@
+Require valid-user

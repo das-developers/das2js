@@ -50,6 +50,10 @@
 #                 Add RUNFLAGS=--dasflex to run the sibling ../dasflex
 #                 locally and point the pages at it.
 #
+# make dist       Stage the test pages, module and fixtures as a static site
+#                 in build.wasm32/site, ready to copy to a web server.  Add
+#                 HTPASSWD=/server/path/.htpasswd for a basic-auth password.
+#
 # make clean      Delete das2js build output and das2C's, keeping das2C's
 #                 downloaded dependencies
 #
@@ -90,7 +94,7 @@ DAS2C_DEP_LIBS=$(DAS2C_FFTW_LIB) $(DAS2C_EXPAT_LIB)
 
 # No -g here: whether DWARF ships is decided at link time, per output below.
 # The libdas3.a and libexpat.a objects keep theirs either way.
-WASM_CFLAGS=-std=c99 -Wall -Werror -O2 -I$(DAS2C) -Iglue --use-port=zlib
+WASM_CFLAGS=-std=c99 -Wall -Werror -O2 -I$(DAS2C) -Iglue -Isrc --use-port=zlib
 
 # NODERAWFS mounts the real filesystem so the test reads fixtures in place,
 # nothing embedded.
@@ -161,7 +165,7 @@ WASM_MOD_LFLAGS=--use-port=zlib -sMODULARIZE=1 -sEXPORT_ES6=1 \
 
 # A bare make builds the deliverable and our test program, runs nothing.
 # das2C's test programs are deps' job.
-all: module $(WBD)/TestWasm.js
+all: module $(WBD)/TestWasm.js $(WBD)/TestRender.js
 
 # One line per target in the header above, in the same order.  Hand kept:
 # update both when a target changes.
@@ -175,17 +179,24 @@ help:
 	@echo '  make headless_test   run the module in headless Firefox, local fixtures'
 	@echo '  make live_test       same, against space.physics.uiowa.edu'
 	@echo '  make server          serve test pages on http://127.0.0.1:9099'
+	@echo '  make dist            stage the pages as a static site in $(WBD)/site'
 	@echo '  make clean           remove our and das2C build output, keep downloads'
 	@echo '  make distclean       clean, plus downloaded dependencies'
 
 # Everything of ours that runs under node alone: no browser, and no network
 # beyond the dependency downloads of a first build.  TestWasm reads stream
 # fixtures by paths relative to the das2C checkout, so it runs from there.
-test: $(WBD)/TestWasm.js
+test: $(WBD)/TestWasm.js $(WBD)/TestRender.js
 	cd $(DAS2C) && $(NODE) $(CURDIR)/$(WBD)/TestWasm.js
+	cd $(DAS2C) && $(NODE) $(CURDIR)/$(WBD)/TestRender.js
 
 $(WBD)/TestWasm.js: test/TestWasm.c glue/wasm.c glue/wasm.h $(DAS2C_WASM_LIB) $(DAS2C_DEP_LIBS) | $(WBD)
 	$(EMCC) $(WASM_CFLAGS) test/TestWasm.c glue/wasm.c $(DAS2C_WASM_LIB) $(DAS2C_DEP_LIBS) $(WASM_TEST_LFLAGS) -o $@
+
+# Pass a directory to also get PPM images, e.g. from the das2C checkout:
+#   node ../../build.wasm32/TestRender.js ../../tmp
+$(WBD)/TestRender.js: test/TestRender.c src/render.c src/render.h glue/wasm.c glue/wasm.h $(DAS2C_WASM_LIB) $(DAS2C_DEP_LIBS) | $(WBD)
+	$(EMCC) $(WASM_CFLAGS) test/TestRender.c src/render.c glue/wasm.c $(DAS2C_WASM_LIB) $(DAS2C_DEP_LIBS) $(WASM_TEST_LFLAGS) -o $@
 
 # Always recurse: das2C's own dependency tracking decides what to rebuild
 $(DAS2C_WASM_LIB): FORCE
@@ -199,8 +210,8 @@ $(DAS2C_DEP_LIBS): $(DAS2C_WASM_LIB) ;
 
 module: $(MODULE) $(JS_OUT)
 
-$(MODULE): glue/wasm.c glue/wasm.h $(DAS2C_WASM_LIB) $(DAS2C_DEP_LIBS) | $(WBD)
-	$(EMCC) $(WASM_CFLAGS) $(MOD_DEBUG) glue/wasm.c $(DAS2C_WASM_LIB) $(DAS2C_DEP_LIBS) $(WASM_MOD_LFLAGS) -o $@
+$(MODULE): glue/wasm.c glue/wasm.h src/render.c src/render.h $(DAS2C_WASM_LIB) $(DAS2C_DEP_LIBS) | $(WBD)
+	$(EMCC) $(WASM_CFLAGS) $(MOD_DEBUG) glue/wasm.c src/render.c $(DAS2C_WASM_LIB) $(DAS2C_DEP_LIBS) $(WASM_MOD_LFLAGS) -o $@
 
 # The ES module sits beside the loader it imports, so one directory is the
 # whole deliverable
@@ -237,6 +248,37 @@ PAGE?=index.html
 server: module
 	$(NODE) test/browser/run.mjs $(PAGE) --serve $(RUNFLAGS)
 
+## Static site ###############################################################
+
+# The same three trees run.mjs mounts, so the pages' relative paths
+# (../build, ../das2C/examples) resolve the same on any server, at any URL
+# prefix.  Only the fixtures the pages fetch are copied: das2C's examples
+# directory is otherwise mostly dead weight.
+#
+# Deploy with a plain copy, e.g.
+#   rsync -a --delete build.wasm32/site/ host:/var/www/html/das2js/
+#
+# HTPASSWD is a path on the SERVER; Apache reads it there.  Create the file
+# there too, with: htpasswd -c /that/path/.htpasswd someuser
+SITE=$(WBD)/site
+SITE_FIXTURES=ex01_polar_mfe.d2t ex08_cassini_rpws_survey.d2t \
+ ex09_juno_waves_survey.d2t ex17_vector_noframe.d3b ex19_cassini_ragged_wfrm.d3t \
+ ex35_strings_rank2.d3b
+
+dist: module
+	rm -rf $(SITE)
+	mkdir -p $(SITE)/build $(SITE)/test/img $(SITE)/das2C/examples
+	cp $(MODULE) $(WBD)/das2c.wasm $(JS_OUT) $(SITE)/build/
+	cp test/browser/*.html test/browser/*.css $(SITE)/test/
+	cp $(filter-out test/browser/run.mjs,$(wildcard test/browser/*.mjs)) $(SITE)/test/
+	cp test/browser/img/*.png test/browser/img/*.svg $(SITE)/test/img/
+	cp $(addprefix $(DAS2C)/examples/,$(SITE_FIXTURES)) $(SITE)/das2C/examples/
+	cp deploy/index.html $(SITE)/
+	cp deploy/htaccess $(SITE)/.htaccess
+ifneq ($(HTPASSWD),)
+	sed 's|@HTPASSWD@|$(HTPASSWD)|' deploy/htauth >> $(SITE)/.htaccess
+endif
+
 ## Dependencies ##############################################################
 
 # The prerequisite on DAS2C_WASM_LIB is for make -j: it keeps this from
@@ -264,4 +306,4 @@ distclean: clean
 	$(MAKE) $(DAS2C_WASM_ARGS) distclean
 
 FORCE:
-.PHONY: all help test module headless_test live_test local_test server deps deps_test clean distclean FORCE
+.PHONY: all help test module headless_test live_test local_test server dist deps deps_test clean distclean FORCE

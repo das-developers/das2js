@@ -75,6 +75,27 @@ and two tools:
 
 `make server PAGE=Perf.html` opens straight onto one page.
 
+## Putting the pages on a web server
+
+Everything is static files; the browser does the work.
+
+    make dist HTPASSWD=/server/path/.htpasswd
+    rsync -a --delete build.wasm32/site/ host:/web/dir/das2js/
+
+* `build.wasm32/site/` is about 15 MB.  Most of that is one fixture,
+  ex08.  The tree has the same layout `make server` uses, so it works
+  under any URL prefix.
+* The generated `.htaccess` declares the `.wasm` and `.mjs` types.  The
+  browser refuses the module without them.  It needs `AllowOverride
+  FileInfo`.
+* `HTPASSWD` is optional and is a path on the server.  It adds basic auth,
+  which needs `AllowOverride AuthConfig`.  Create the password file on the
+  server with `htpasswd -c /server/path/.htpasswd someuser`.
+* The pages talk to the node runner only when served from 127.0.0.1, so a
+  real server never sees their log POSTs.
+* The data presets fetch from the das servers cross origin, which works
+  because those servers send `Access-Control-Allow-Origin: *`.
+
 ## Clean rebuild
 
     make clean       # this project's and das2C's wasm build output

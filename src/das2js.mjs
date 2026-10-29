@@ -155,6 +155,23 @@ export class DasRuntime {
 			aryDoubles:    w('daswasm_ary_doubles', N, [N, N, N]),
 			aryFree:       w('daswasm_ary_free', null, [N]),
 			free:          w('daswasm_free', null, [N]),
+
+			/* the raster painter, src/render.h */
+			newRen:        w('new_DasRender', N, [N, N]),
+			renSetX:       w('DasRender_setX', N, [N, S, S]),
+			renAttach:     w('DasRender_attach', N, [N, N]),
+			renKind:       w('DasRender_kind', N, [N]),
+			renColorize:   w('DasRender_colorize', N, [N]),
+			renDirty:      w('DasRender_dirty', N, [N]),
+			renPaintMs:    w('DasRender_paintMs', N, [N]),
+			renValues:     w('DasRender_values', N, [N]),
+			renRescales:   w('DasRender_rescales', N, [N]),
+			renSkipped:    w('DasRender_skipped', N, [N]),
+			renNote:       w('DasRender_note', S, [N]),
+			renRange:      w('DasRender_range', N, [N, N, N]),
+			renIsLog:      w('DasRender_isLog', N, [N, N]),
+			renUnits:      w('DasRender_units', S, [N, N]),
+			delRen:        w('del_DasRender', null, [N]),
 		};
 
 		this.#c.init(progName);
@@ -225,6 +242,9 @@ export class DasRuntime {
 
 	/** A push-mode stream reader, for feeding bytes you obtained yourself */
 	newReader(){ return new DasReader(this); }
+
+	/** A raster painter of the given size in pixels, see DasRender */
+	newRender(width, height){ return new DasRender(this, width, height); }
 
 	/** Fetch a URL and parse the response body as a das stream.
 	 *
@@ -418,6 +438,9 @@ export class DasReader {
 	/** Text of the last in-band exception packet, or '' */
 	get exception(){ return this.#d._c().rdrException(this.#p); }
 
+	/* The DasWasmRdr pointer, for DasRender.attach(); 0 once freed */
+	_p(){ return this.#p; }
+
 	/** Release the parser, the scratch buffer, and the stream unless it was
 	 * taken.  The reader is unusable afterwards. */
 	free()
@@ -430,6 +453,121 @@ export class DasReader {
 		this.#buf = 0;
 		this.#bufSz = 0;
 		if(!this.#taken) this.#strm = null;
+	}
+}
+
+/* ************************************************************************ */
+
+/* DasRender.kind values, indexed by the C constants plus one, since
+ * DASRENDER_UNUSABLE is -1 */
+const RENDER_KINDS = ['unusable', 'none', 'spectrogram', 'density'];
+
+/** Paints a picture of a stream while it downloads.
+ *
+ * Pixels, not a plot: no axes or labels.  The C side (src/render.h) hooks
+ * into a reader and paints each packet as it is parsed, so by the time a
+ * chunk's feed() returns its data are already in the image.  This class
+ * only hands the finished pixels to a canvas.
+ *
+ * Use, in this order:
+ *
+ *   const ren = das.newRender(800, 232);
+ *   ren.setX('2021-07-21', '2021-07-22');   // what the request asked for
+ *   ren.attach(reader);                     // before the first feed()
+ *   ... feed chunks; on a display timer:
+ *   if(ren.dirty) ctx.putImageData(ren.imageData(), 0, 0);
+ *   ... at the end: reader.free() FIRST, then ren.free()
+ *
+ * The order at the end matters: the C reader keeps a pointer to the C
+ * renderer, so the renderer must outlive the reader's last feed.
+ */
+export class DasRender {
+	#d;
+	#p;
+	#w;
+	#h;
+
+	constructor(das3, width, height)
+	{
+		this.#d = das3;
+		this.#w = width;
+		this.#h = height;
+		this.#p = das3._c().newRen(width, height);
+		if(this.#p === 0)
+			throw new DasError('new_DasRender failed: ' + das3.lastError());
+	}
+
+	get width(){ return this.#w; }
+	get height(){ return this.#h; }
+
+	/** Set the time range the image covers, as ISO 8601 strings.  Must be
+	 * called before any data arrive. */
+	setX(beg, end)
+	{
+		if(this.#d._c().renSetX(this.#p, String(beg), String(end)) !== 0)
+			throw new DasError(this.#d.lastError());
+	}
+
+	/** Paint whatever this reader parses from now on */
+	attach(reader)
+	{
+		if(this.#d._c().renAttach(this.#p, reader._p()) !== 0)
+			throw new DasError(this.#d.lastError());
+	}
+
+	/** 'none' until the first dataset header, then 'spectrogram' or
+	 * 'density', or 'unusable' (see note) */
+	get kind(){ return RENDER_KINDS[this.#d._c().renKind(this.#p) + 1]; }
+
+	/** True if something was painted since the last imageData() call */
+	get dirty(){ return this.#d._c().renDirty(this.#p) !== 0; }
+
+	/** Total milliseconds spent painting inside feed() calls */
+	get paintMs(){ return this.#d._c().renPaintMs(this.#p); }
+
+	/** Values painted so far, repaints included; values / paintMs is the
+	 * painter's rate */
+	get values(){ return this.#d._c().renValues(this.#p); }
+
+	/** How many times a range change forced a repaint or recolor */
+	get rescales(){ return this.#d._c().renRescales(this.#p); }
+
+	/** Datasets not painted because they didn't match the first one */
+	get skipped(){ return this.#d._c().renSkipped(this.#p); }
+
+	/** Why something wasn't painted, or '' */
+	get note(){ return this.#d._c().renNote(this.#p); }
+
+	/** Range of the vertical (color = false) or color axis, for a caption:
+	 * {min, max, log, units}, min and max NaN until known */
+	axis(color = false)
+	{
+		const c = this.#d._c(), b = color ? 1 : 0;
+		return {
+			min: c.renRange(this.#p, b, 0), max: c.renRange(this.#p, b, 1),
+			log: c.renIsLog(this.#p, b) !== 0, units: c.renUnits(this.#p, b),
+		};
+	}
+
+	/** Build the RGBA image and return it as an ImageData for putImageData().
+	 *
+	 * The ImageData's pixels are a VIEW onto the wasm heap, not a copy.
+	 * putImageData() copies them into the canvas right away, so use it at
+	 * once and drop it; the next feed() may grow the heap and detach it (see
+	 * the top of this file). */
+	imageData()
+	{
+		const p = this.#d._c().renColorize(this.#p);
+		const px = new Uint8ClampedArray(this.#d._m().HEAPU8.buffer, p, this.#w * this.#h * 4);
+		return new ImageData(px, this.#w, this.#h);
+	}
+
+	/** Release the C renderer.  Free the attached reader first. */
+	free()
+	{
+		if(this.#p === 0) return;
+		this.#d._c().delRen(this.#p);
+		this.#p = 0;
 	}
 }
 

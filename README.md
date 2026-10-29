@@ -36,7 +36,7 @@ in their native binary encoding and the browser reads them where they
 landed.  Screenshot of the live run below. Method and more streams in 
 [notes/performance.md](notes/performance.md).
 
-![notes/jno_wav_burst_perf.png](notes/jno_wav_burst_perf.png)
+![notes/hammer_perf.png](notes/hammer_perf.png)
 
 Like the other das2C bindings (das2py, das2dlm) this project compiles a
 pinned das2C commit in rather than linking a system copy.  Until das2C
