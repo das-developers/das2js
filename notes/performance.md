@@ -65,9 +65,9 @@ Number(t0)` is not the same number as `Number(t - t0)`.
 
 ## Live streams in a browser
 
-`make perf` serves a page that fetches a stream from a server, then
-re-parses the same bytes from memory to separate the parser from the
-network.  Measured 2026-10-21 in headless Firefox 143 on the machine above,
+The Performance page of `make server` (or `make server PAGE=Perf.html`)
+fetches a stream from a server, then re-parses the same bytes from memory
+to separate the parser from the network.  Measured 2026-10-21 in headless Firefox 143 on the machine above,
 against the dasFlex server at space.physics.uiowa.edu:
 
 | stream                                  |    bytes | wall  | first record | re-parse | MB/s |

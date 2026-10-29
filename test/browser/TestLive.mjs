@@ -5,9 +5,9 @@
  * with its in-band exception message, and a das2 stream big enough to see
  * mid-download growth.
  *
- * Not part of `make browser` since it needs a server: `make live` for the
- * public one over the network, `make local` for the dasFlex checkout next
- * door through the CGI shim. */
+ * Not part of `make headless_test` since it needs a server: `make
+ * live_test` for the public one over the network, `make local_test` for the
+ * dasFlex checkout next door through the CGI shim. */
 
 import {load, DasError} from '/build/das2js.mjs';
 

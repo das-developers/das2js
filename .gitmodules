@@ -2,6 +2,3 @@
 	path = deps/das2C
 	url = https://github.com/das-developers/das2C.git
 	branch = master
-[submodule "deps/expat"]
-	path = deps/expat
-	url = https://github.com/libexpat/libexpat.git

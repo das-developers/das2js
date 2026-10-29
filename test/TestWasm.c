@@ -1,9 +1,9 @@
-/** @file TestWasm.c Native exercise of the flat FFI layer in das3/wasm.h
+/** @file TestWasm.c Exercise of the flat FFI layer in glue/wasm.h
  *
  * The wasm.h functions exist so that a foreign runtime (JavaScript via
  * emscripten first) can read streams and reach decoded values without
- * touching macros, enums or struct layouts.  Everything is testable
- * natively: this program plays the role of the JS module, calling only
+ * touching macros, enums or struct layouts.  This program, compiled to
+ * wasm and run under node, plays the role of the JS module, calling only
  * daswasm and DasWasmRdr functions for stream access and cross-checking
  * the answers against direct library calls.
  */

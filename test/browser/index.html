@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>das2js test pages</title>
+<link rel="stylesheet" href="style.css">
+<style>
+	/* The banner: the art fills the header and keeps Jupiter in view on
+	 * narrow screens by trimming the tail end on the left */
+	header {
+		position: relative;
+		height: 230px;
+		overflow: hidden;
+		border-bottom: 1px solid var(--line);
+	}
+	header .art {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		object-position: right center;
+	}
+	header .brand {
+		position: relative;
+		display: flex;
+		align-items: center;
+		gap: 1.2em;
+		height: 100%;
+		max-width: 960px;
+		margin: 0 auto;
+		padding: 0 16px;
+	}
+	header .logo { width: 170px; height: auto; }
+	header h1 { margin: 0; font-size: 2.2em; }
+	header h1 .js { color: var(--gold); }
+	header .tag { margin: 0.2em 0 0; }
+
+	.lead { margin: 0 0 1em; }
+
+	/* One card per page; the whole card is the link */
+	.cards {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+		gap: 14px;
+	}
+	a.page {
+		display: block;
+		padding: 1em 1.1em;
+		background: var(--panel);
+		border: 1px solid var(--line);
+		border-radius: 10px;
+		color: var(--text);
+		text-decoration: none;
+		transition: border-color 0.15s, background 0.15s;
+	}
+	a.page:hover, a.page:focus-visible {
+		background: var(--hover);
+		border-color: var(--gold);
+		outline: none;
+	}
+	a.page strong { display: block; color: var(--blue); font-size: 1.1em; }
+	a.page span { display: block; margin-top: 0.4em; color: var(--muted); }
+
+	footer {
+		max-width: 960px;
+		margin: 0 auto;
+		padding: 1.2em 16px 2em;
+		border-top: 1px solid var(--line);
+		color: var(--muted);
+		font-size: 0.9em;
+	}
+
+	@media (max-width: 560px) {
+		header { height: 190px; }
+		header .logo { width: 110px; }
+		header h1 { font-size: 1.6em; }
+	}
+</style>
+</head>
+<body>
+
+<header>
+	<img class="art" src="img/magnetosphere.svg" alt="">
+	<div class="brand">
+		<img class="logo" src="img/das3_logo.png" alt="das3">
+		<div>
+			<h1><span class="js">JS</span> Test pages</h1>
+			<p class="tag">das streams parsed in a browser by das2js</p>
+		</div>
+	</div>
+</header>
+
+<main>
+	<h2>Tests</h2>
+	<p class="lead">Each reports pass or fail on the page and in the terminal
+	running <code>make server</code>.</p>
+	<div class="cards">
+		<a class="page" href="TestModule.html">
+			<strong>Module test</strong>
+			<span>The module against the local stream fixtures, no network.
+			Same page as <code>make headless_test</code>.</span>
+		</a>
+		<a class="page" href="TestLive.html">
+			<strong>Live server test</strong>
+			<span>A real request to the dasFlex server at
+			space.physics.uiowa.edu, or to the sibling dasFlex when served with
+			<code>RUNFLAGS=--dasflex</code>.  Same page as
+			<code>make live_test</code>.</span>
+		</a>
+	</div>
+
+	<h2>Tools</h2>
+	<div class="cards">
+		<a class="page" href="Inspect.html">
+			<strong>Structure inspector</strong>
+			<span>Load any stream URL and see every dataset, dimension and
+			variable as JSON, without the data values.  <code>?url=...</code>
+			bookmarks a stream.</span>
+		</a>
+		<a class="page" href="Perf.html">
+			<strong>Performance</strong>
+			<span>Fetch a live stream, then re-parse the same bytes from memory,
+			so parser time shows separately from the network.</span>
+		</a>
+	</div>
+</main>
+
+<footer>
+	Banner: Jupiter's magnetosphere, not to scale, with the Io plasma torus,
+	the Galilean moons and Juno on its polar orbit.  The real magnetotail
+	stretches as far as Saturn's orbit, where Voyager 2 detected it in 1981.
+</footer>
+
+<script>
+/* With RUNFLAGS=--dasflex the runner opens this page as
+ * index.html?server=local&port=N.  Plain links would drop that query, so
+ * copy it onto each one.  location.search is the "?..." part of this page's
+ * URL, an empty string when there is none. */
+if(location.search)
+	for(const a of document.querySelectorAll('a.page'))
+		a.href = a.getAttribute('href') + location.search;
+</script>
+</body>
+</html>

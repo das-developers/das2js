@@ -1,0 +1,103 @@
+/* Shared look for the das2js test pages.  index.html adds the banner and
+ * the page cards on top of this. */
+
+/* Colors come from the banner art: the logo's gold, the field lines' blue,
+ * and the deep blue of the space around Jupiter */
+:root {
+	color-scheme: dark;
+	--bg:     #070b16;
+	--panel:  #0f1730;
+	--hover:  #15204a;
+	--line:   #22305a;
+	--text:   #dde6f5;
+	--muted:  #93a3c4;
+	--gold:   #ffcd00;
+	--blue:   #5aa9ff;
+	--code:   #0a1124;
+	--err:    #ff7a6b;
+}
+
+* { box-sizing: border-box; }
+
+body {
+	margin: 0;
+	background: var(--bg);
+	color: var(--text);
+	font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+a { color: var(--blue); }
+
+/* Page column; the index's header and footer reuse the width */
+main { max-width: 960px; margin: 0 auto; padding: 0 16px 2em; }
+
+h1 {
+	margin: 0.8em 0 0.3em;
+	font: italic bold 1.9em "Noto Serif", Georgia, serif;
+}
+
+h2 {
+	margin: 1.8em 0 0.3em;
+	font-size: 0.85em;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--gold);
+}
+
+p { color: var(--muted); }
+
+/* Thin bar across the top of every page but the index */
+nav.bar {
+	border-bottom: 1px solid var(--line);
+	background: var(--panel);
+}
+nav.bar div { max-width: 960px; margin: 0 auto; padding: 0.55em 16px; }
+nav.bar a { color: var(--gold); text-decoration: none; font-weight: 600; }
+nav.bar a:hover { text-decoration: underline; }
+
+code, pre {
+	background: var(--code);
+	border: 1px solid var(--line);
+	color: var(--text);
+}
+code { padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.9em; }
+pre {
+	padding: 1em;
+	border-radius: 8px;
+	overflow: auto;
+	font-size: 0.88em;
+}
+pre:empty { display: none; }
+
+/* Forms on the tool pages */
+input[type=text], input[type=number] {
+	padding: 0.4em 0.6em;
+	background: var(--code);
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	color: var(--text);
+	font: inherit;
+}
+input:focus { outline: none; border-color: var(--gold); }
+button {
+	padding: 0.4em 1.1em;
+	background: var(--gold);
+	border: 0;
+	border-radius: 6px;
+	color: #1a1400;
+	font: inherit;
+	font-weight: 600;
+	cursor: pointer;
+}
+button:hover { filter: brightness(1.1); }
+
+table { border-collapse: collapse; margin-top: 1em; }
+th, td {
+	padding: 0.35em 0.7em;
+	border: 1px solid var(--line);
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+th { background: var(--panel); color: var(--muted); font-weight: 600; }
+
+.err { color: var(--err); }

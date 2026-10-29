@@ -1,61 +1,69 @@
-# das2js build
+# das2js makefile: wraps emsdk and other build tools in a gnumake interface
 #
-# Two C dependencies are pinned as submodules and compiled in, never linked
-# dynamically: deps/das2C (the stream library) and deps/expat (its XML
-# parser, needed because emscripten ships a zlib port but no expat port).
+# Dependency Tree
+# ---------------
+# das2js
+#  |
+#  +- das2C: Stream parsing, catalog request parsing (LGPL)
+#      |
+#      +- expat: XML parser (MIT)
+#      |
+#      +- fftw: Discrete Fourier Transforms (GPL)
+#      |
+#      +- zlib: Compressed streams, an emscripten port (zlib license)
 #
-# Targets:
-#
-#   make             build the module and the wasm test programs, run nothing
-#   make test        run the headless node tests: make wasm, then make wasm_test
-#   make wasm        cross-compile libexpat.a and libdas3.a to wasm32, build
-#                    test/TestWasm.c against them, run it under node
-#   make module      the browser deliverable in build.wasm32/: das2c.wasm, its
-#                    emscripten loader das2c.mjs, and the hand-written ES
-#                    module das2js.mjs copied from src/.  DEBUG=yes keeps
-#                    the C debug info (about 5x the .wasm size)
-#   make browser     build the module and run test/browser/ under headless
-#                    Firefox via a small node runner (Firefox only; it is
-#                    what is installed here and --no-remote keeps it out of
-#                    the developer's own session)
-#   make live        the same against a public dasFlex server over the network
-#   make local       the same against ../dasflex (DASFLEX=... to point elsewhere)
-#                    through test/dasflex_cgi.py, a CGI shim; no Apache needed
-#   make serve       serve the build and a test page on http://127.0.0.1:9099
-#                    for a browser you drive yourself (PAGE=TestLive.html,
-#                    RUNFLAGS=--dasflex to add the local dasFlex); Ctrl-C stops
-#   make wasm_test   run das2C's own regression suite as wasm under node
-#   make native      native build of the glue plus TestWasm against a native
-#                    deps/das2C, for debugging the glue with ordinary tools;
-#                    needs gcc and das2C's system libraries, so never a default
-#   make clean
-#
+# Environment
+# -----------
 # The emscripten toolchain must be active in the calling shell (source
 # emsdk_env.sh).  Node for running wasm output is taken from EMSDK_NODE, which
 # that script exports; pass NODE=... to use another.
+#
+# Make Targets
+# ------------
+# These are the top level make targets, in run order.  The two deps targets
+# are optional: a plain make builds the das2C library it needs.  Run them
+# after a das2C pin bump or when altering das2C code.  `make help` prints
+# a one line reminder of each.
+#
+# make deps       Build das2C and its test programs under emsdk
+#
+# make deps_test  Run das2C's test suite under node
+#
+# make            Build the browser module (das2js.mjs, das2c.mjs, das2c.wasm)
+#                 and our node test program, runs nothing.  Use DEBUG=yes
+#                 to retain debug info, not recommended, it increases module
+#                 size by a factor of 5.
+#
+# make test       Run das2js test programs under node.js
+#
+# make headless_test
+#                 Run the module in a headless browser against local test
+#                 programs and data.  Browser is set with TEST_BROWSER=firefox,
+#                 the only one supported so far.  The browser is run in an
+#                 independent profile.
+#
+# make live_test  Run in a headless browser, but against the live dasFlex
+#                 server at space.physics.uiowa.edu
+#
+# make server     Start a node server at http://127.0.0.1:9099 with an index
+#                 of the test pages and tools, Ctrl-C stops the server.
+#                 Add RUNFLAGS=--dasflex to run the sibling ../dasflex
+#                 locally and point the pages at it.
+#
+# make clean      Delete das2js build output and das2C's, keeping das2C's
+#                 downloaded dependencies
+#
+# make distclean  Remove all build products, and all downloads in
+#                 dependencies.
+#
 
 DAS2C=deps/das2C
-EXPAT_SRC=deps/expat/expat/lib
 
-# One output directory per target architecture, build.<arch>, as in das2C
-# (whose wasm objects land in deps/das2C/build.wasm32)
-BD=build.$(shell uname -m)
+# Named build.<arch> as in das2C, whose wasm objects land in
+# deps/das2C/build.wasm32
 WBD=build.wasm32
 
-# Native ---------------------------------------------------------------------
-
-CC=gcc
-CFLAGS=-std=c99 -Wall -Werror -ggdb -I$(DAS2C) -Iglue
-
-DAS2C_LIB=$(DAS2C)/build./libdas3.a
-
-# Same system libraries das2C itself links on Linux
-LIBS=$(DAS2C_LIB) -lfftw3 -lexpat -lssl -lcrypto -lz -lm -lpthread
-
-# Wasm -----------------------------------------------------------------------
-
 EMCC=emcc
-EMAR=emar
 
 ifeq ($(NODE),)
 ifeq ($(EMSDK_NODE),)
@@ -65,57 +73,80 @@ NODE:=$(EMSDK_NODE)
 endif
 endif
 
-EXPAT_INC=$(CURDIR)/$(EXPAT_SRC)
-EXPAT_LIB=$(CURDIR)/$(WBD)/libexpat.a
-
-# The three parser sources plus one entropy source.  The entropy choice has
-# to agree with HAVE_GETENTROPY in buildfiles/expat_config.h, the hand-written
-# stand-in for what expat's configure script would have probed.
-EXPAT_SRCS=xmlparse.c xmltok.c xmlrole.c random_getentropy.c xcs.c
-EXPAT_OBJS=$(patsubst %.c,$(WBD)/expat_%.o,$(EXPAT_SRCS))
-EXPAT_CFLAGS=-O2 -g -I$(EXPAT_INC) -Ibuildfiles
+# das2C's wasm build is its own makefile, use -C first, so the -f path and
+# everything in it resolve from the das2C tree.
+#
+# Only the arguments are kept here: make treats a recipe line as a recursive
+# make, honoring -n and sharing -j job slots with it, only when $(MAKE)
+# appears in the line itself, not inside another variable.
+DAS2C_WASM_ARGS=-C $(DAS2C) -f buildfiles/emscripten.mak
 
 DAS2C_WASM_LIB=$(DAS2C)/build.wasm32/libdas3.a
+
+# das2C's dependency builds, in link order after libdas3.a
+DAS2C_FFTW_LIB=$(DAS2C)/deps.wasm32/fftw/lib/libfftw3.a
+DAS2C_EXPAT_LIB=$(DAS2C)/deps.wasm32/expat/lib/libexpat.a
+DAS2C_DEP_LIBS=$(DAS2C_FFTW_LIB) $(DAS2C_EXPAT_LIB)
 
 # No -g here: whether DWARF ships is decided at link time, per output below.
 # The libdas3.a and libexpat.a objects keep theirs either way.
 WASM_CFLAGS=-std=c99 -Wall -Werror -O2 -I$(DAS2C) -Iglue --use-port=zlib
 
 # NODERAWFS mounts the real filesystem so the test reads fixtures in place,
-# nothing embedded.  EXIT_RUNTIME turns main()'s return into the exit status.
+# nothing embedded.
+#
+# EXIT_RUNTIME turns main()'s return into the exit status.
+#
 # -g keeps DWARF in the .wasm, which makes emcc warn that wasm-opt ran fewer
-# passes; -Werror on the same command line would turn that into a failed
-# link, so the warning is waived here.
-# The browser module uses none of these.
+#    passes
+#
+# -Werror on the same command line would turn that into a failed link, so the
+#    warning is waived here.
+#
+# (The browser module uses none of these)
 WASM_TEST_LFLAGS=--use-port=zlib -sENVIRONMENT=node -sNODERAWFS=1 \
  -sEXIT_RUNTIME=1 -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1048576 \
  -g -Wno-limited-postlink-optimizations
 
-# The shipped module carries no debug info.  -g at this link would keep the
-# DWARF from every das2C and expat object and make das2c.wasm about 2.2 MB
-# instead of 450 KB.  DEBUG=yes puts it back for stepping through the C in a
-# browser debugger, and is why the module link keeps the warning waiver too.
+# The shipped module carries no debug info.
+#
+# -g at this link would keep the DWARF from every sub-module, making das2c.wasm
+# about 2.2 MB instead of 450 KB.  DEBUG=yes puts it back for stepping through
+# the C in a browser debugger, and is why the module link keeps the warning
+# waiver too.
+#
 # Run make clean first: nothing here notices DEBUG changing.
 ifeq ($(DEBUG),yes)
 MOD_DEBUG=-g
 endif
 
-# Browser module link.  MODULARIZE + EXPORT_ES6 turns the loader into an ES
-# module exporting one factory function (EXPORT_NAME) that resolves to the
-# runtime once the .wasm is instantiated; nothing runs at import time.  No
-# filesystem: streams arrive through DasWasmRdr_feed, never fopen.  The C
-# export surface is marked EMSCRIPTEN_KEEPALIVE in glue/wasm.h, so only the
-# allocator the JS side needs for its scratch buffers is listed here.  The
+# Browser module link
+#
+# MODULARIZE + EXPORT_ES6 turns the loader into an ES module exporting one
+# factory function (EXPORT_NAME) that resolves to the runtime once the
+# .wasm is instantiated; nothing runs at import time.
+#
+# No filesystem: streams arrive through DasWasmRdr_feed, never fopen.
+#
+# The C export surface is marked EMSCRIPTEN_KEEPALIVE in glue/wasm.h, so only
+# the allocator the JS side needs for its scratch buffers is listed here.  The
 # HEAP* views are what the JS wraps TypedArrays around, hence exported.
-# Only the runtime helpers the JS actually uses are exported: cwrap to bind
-# the glue functions once at load time, HEAPU8 and HEAP32 to reach the heap.
+#
+# Only the runtime helpers the JS actually uses are exported:
+#
+#  * cwrap to bind the glue functions once at load time
+#  * HEAPU8 and HEAP32 to reach the heap.
+#
 # The other typed views (HEAP16, HEAPF64, HEAP64...) are not exported because
 # das2js.mjs builds its own TypedArrays over HEAPU8.buffer, so BigInt64Array
 # over TT2000 values needs nothing extra here, not even WASM_BIGINT (no glue
-# signature carries an int64 across the call boundary).  ccall is left out
-# on purpose: it re-marshals on every call and would hand downstream a slow
-# path we would rather they did not find.  The 1 MiB stack stays: das2C has
-# large automatics.
+# signature carries an int64 across the call boundary).
+#
+# ccall is left out on purpose: it re-marshals on every call and would hand
+#   downstream a slow path, don't give them a footgun.
+#
+# The 1 MiB stack stays: das2C has large automatics.
+
 MODULE=$(WBD)/das2c.mjs
 JS_SRCS=$(wildcard src/*.mjs)
 JS_OUT=$(patsubst src/%,$(WBD)/%,$(JS_SRCS))
@@ -128,102 +159,109 @@ WASM_MOD_LFLAGS=--use-port=zlib -sMODULARIZE=1 -sEXPORT_ES6=1 \
 
 ## Default ###################################################################
 
-# A bare make builds the deliverable and the wasm test programs, runs nothing
-all: module $(WBD)/TestWasm.js wasm_test_build
+# A bare make builds the deliverable and our test program, runs nothing.
+# das2C's test programs are deps' job.
+all: module $(WBD)/TestWasm.js
 
-# Everything that runs under node alone: no Firefox, no network
-test: wasm wasm_test
+# One line per target in the header above, in the same order.  Hand kept:
+# update both when a target changes.
+help:
+	@echo 'make targets, in run order (the deps steps are optional):'
+	@echo
+	@echo '  make deps            build das2C, its expat and FFTW, its test programs'
+	@echo '  make deps_test       run das2C test suite under node'
+	@echo '  make                 build the browser module and our test program'
+	@echo '  make test            run our tests under node'
+	@echo '  make headless_test   run the module in headless Firefox, local fixtures'
+	@echo '  make live_test       same, against space.physics.uiowa.edu'
+	@echo '  make server          serve test pages on http://127.0.0.1:9099'
+	@echo '  make clean           remove our and das2C build output, keep downloads'
+	@echo '  make distclean       clean, plus downloaded dependencies'
 
-## Native ####################################################################
-
-# TestWasm reads stream fixtures by paths relative to the das2C checkout, so
-# it runs from there
-native: $(BD)/TestWasm
-	cd $(DAS2C) && $(CURDIR)/$(BD)/TestWasm
-
-$(BD)/TestWasm: test/TestWasm.c glue/wasm.c glue/wasm.h $(DAS2C_LIB) | $(BD)
-	$(CC) $(CFLAGS) test/TestWasm.c glue/wasm.c $(LIBS) -o $@
-
-# Only builds das2C when the archive is missing; after pulling the submodule
-# run make -C deps/das2C build yourself
-$(DAS2C_LIB):
-	$(MAKE) -C $(DAS2C) build
-
-## Wasm ######################################################################
-
-wasm: $(WBD)/TestWasm.js
+# Everything of ours that runs under node alone: no browser, and no network
+# beyond the dependency downloads of a first build.  TestWasm reads stream
+# fixtures by paths relative to the das2C checkout, so it runs from there.
+test: $(WBD)/TestWasm.js
 	cd $(DAS2C) && $(NODE) $(CURDIR)/$(WBD)/TestWasm.js
 
-$(WBD)/TestWasm.js: test/TestWasm.c glue/wasm.c glue/wasm.h $(DAS2C_WASM_LIB) $(EXPAT_LIB) | $(WBD)
-	$(EMCC) $(WASM_CFLAGS) test/TestWasm.c glue/wasm.c $(DAS2C_WASM_LIB) $(EXPAT_LIB) $(WASM_TEST_LFLAGS) -o $@
+$(WBD)/TestWasm.js: test/TestWasm.c glue/wasm.c glue/wasm.h $(DAS2C_WASM_LIB) $(DAS2C_DEP_LIBS) | $(WBD)
+	$(EMCC) $(WASM_CFLAGS) test/TestWasm.c glue/wasm.c $(DAS2C_WASM_LIB) $(DAS2C_DEP_LIBS) $(WASM_TEST_LFLAGS) -o $@
 
 # Always recurse: das2C's own dependency tracking decides what to rebuild
 $(DAS2C_WASM_LIB): FORCE
-	$(MAKE) -C $(DAS2C) EMSCRIPTEN=yes EXPAT_INC=$(EXPAT_INC) build
+	$(MAKE) $(DAS2C_WASM_ARGS) build
 
-$(EXPAT_LIB): $(EXPAT_OBJS)
-	rm -f $@
-	$(EMAR) rc $@ $(EXPAT_OBJS)
+# The empty recipe says the recursion above made them, so make neither looks
+# for another way to build them nor, under -j, checks for them too early
+$(DAS2C_DEP_LIBS): $(DAS2C_WASM_LIB) ;
 
-$(WBD)/expat_%.o: $(EXPAT_SRC)/%.c buildfiles/expat_config.h | $(WBD)
-	$(EMCC) -c $(EXPAT_CFLAGS) -o $@ $<
+## Wasm ######################################################################
 
 module: $(MODULE) $(JS_OUT)
 
-$(MODULE): glue/wasm.c glue/wasm.h $(DAS2C_WASM_LIB) $(EXPAT_LIB) | $(WBD)
-	$(EMCC) $(WASM_CFLAGS) $(MOD_DEBUG) glue/wasm.c $(DAS2C_WASM_LIB) $(EXPAT_LIB) $(WASM_MOD_LFLAGS) -o $@
+$(MODULE): glue/wasm.c glue/wasm.h $(DAS2C_WASM_LIB) $(DAS2C_DEP_LIBS) | $(WBD)
+	$(EMCC) $(WASM_CFLAGS) $(MOD_DEBUG) glue/wasm.c $(DAS2C_WASM_LIB) $(DAS2C_DEP_LIBS) $(WASM_MOD_LFLAGS) -o $@
 
 # The ES module sits beside the loader it imports, so one directory is the
 # whole deliverable
 $(WBD)/%.mjs: src/%.mjs | $(WBD)
 	cp $< $@
 
-browser: module
+# The headless runner drives Firefox only so far
+TEST_BROWSER?=firefox
+ifneq ($(filter headless_test live_test local_test,$(MAKECMDGOALS)),)
+ifneq ($(TEST_BROWSER),firefox)
+$(error TEST_BROWSER=$(TEST_BROWSER): only firefox is supported so far)
+endif
+endif
+
+headless_test: module
 	$(NODE) test/browser/run.mjs
 
 # Same runner, real server: needs the network and a public dasFlex that is up
-live: module
+live_test: module
 	$(NODE) test/browser/run.mjs TestLive.html
 
 # Same page against the dasFlex checkout next door, served through the CGI
 # shim in test/dasflex_cgi.py; no network, no Apache.  A sibling checkout
 # rather than a submodule on purpose: a test server should track head.
 DASFLEX?=../dasflex
-local: module
+local_test: module
 	$(NODE) test/browser/run.mjs TestLive.html --dasflex=$(DASFLEX)
 
 # No headless Firefox: the runner prints a URL and waits.  Load it, read the
 # page and the devtools console, edit, reload.  Needed because file:// cannot
 # load ES modules or .wasm, so "just open the html" does not work.
-PAGE?=TestModule.html
-serve: module
+# PAGE=Perf.html and the like opens straight onto one page.
+PAGE?=index.html
+server: module
 	$(NODE) test/browser/run.mjs $(PAGE) --serve $(RUNFLAGS)
 
-# The structure inspector: load any stream URL, see the whole dataset tree
-inspect: module
-	$(NODE) test/browser/run.mjs Inspect.html --serve $(RUNFLAGS)
-
-# Real-world timing against a live server, then re-parse from memory
-perf: module
-	$(NODE) test/browser/run.mjs Perf.html --serve $(RUNFLAGS)
+## Dependencies ##############################################################
 
 # The prerequisite on DAS2C_WASM_LIB is for make -j: it keeps this from
 # recursing into das2C while the library build is still in there
-wasm_test_build: $(EXPAT_LIB) $(DAS2C_WASM_LIB)
-	$(MAKE) -C $(DAS2C) EMSCRIPTEN=yes EXPAT_INC=$(EXPAT_INC) EXPAT_LIB=$(EXPAT_LIB) build_test
+deps: $(DAS2C_WASM_LIB)
+	$(MAKE) $(DAS2C_WASM_ARGS) build_test
 
-# On wasm_test_build rather than EXPAT_LIB alone so that, under make -j, the
-# library build in das2C is finished before this recursion starts
-wasm_test: wasm_test_build
-	$(MAKE) -C $(DAS2C) EMSCRIPTEN=yes EXPAT_INC=$(EXPAT_INC) EXPAT_LIB=$(EXPAT_LIB) test
+# On deps for the same make -j reason
+deps_test: deps
+	$(MAKE) $(DAS2C_WASM_ARGS) test
 
 ## Housekeeping ##############################################################
 
-$(BD) $(WBD):
+$(WBD):
 	mkdir -p $@
 
+# das2C is still in flux, clean it too, its objects don't notice
+# compile flag changes, and they rebuild quickly.  Keep the downloads.
 clean:
 	rm -rf build.*
+	$(MAKE) $(DAS2C_WASM_ARGS) clean
+
+# Also the expat and FFTW downloads and builds
+distclean: clean
+	$(MAKE) $(DAS2C_WASM_ARGS) distclean
 
 FORCE:
-.PHONY: all test native wasm module browser live local serve inspect perf wasm_test wasm_test_build clean FORCE
+.PHONY: all help test module headless_test live_test local_test server deps deps_test clean distclean FORCE

@@ -47,13 +47,17 @@ const MOUNTS = [
 ];
 
 /* The .wasm type matters: WebAssembly.instantiateStreaming refuses anything
- * else.  Module scripts need a JavaScript type too. */
+ * else.  Module scripts need a JavaScript type too, and so do stylesheets
+ * and SVG images: browsers ignore either one served under a generic type. */
 const MIME = {
 	'.html': 'text/html; charset=utf-8',
 	'.mjs':  'text/javascript; charset=utf-8',
 	'.js':   'text/javascript; charset=utf-8',
+	'.css':  'text/css; charset=utf-8',
 	'.wasm': 'application/wasm',
 	'.json': 'application/json',
+	'.png':  'image/png',
+	'.svg':  'image/svg+xml',
 };
 
 /* --timeout=N (seconds) for pages that pull hundreds of megabytes */
@@ -159,7 +163,7 @@ const server = http.createServer(async (req, res) => {
 
 server.on('error', e => {
 	if(e.code === 'EADDRINUSE')
-		console.log(`ERROR: port ${listenPort} is in use (another make serve running?); try --port=N`);
+		console.log(`ERROR: port ${listenPort} is in use (another make server running?); try --port=N`);
 	else
 		console.log('ERROR: ' + e.message);
 	if(dasflex) dasflex.kill();
@@ -213,8 +217,13 @@ server.listen(listenPort, '127.0.0.1', async () => {
 		{stdio: ['ignore', 'pipe', 'pipe']});
 
 	/* Forward Firefox's console lines, which are prefixed by the pref with
-	 * "console.log: " and the like; keep them as-is for diagnosis */
+	 * "console.log: " and the like; keep them as-is for diagnosis.
+	 *
+	 * Nothing after the verdict: finish() kills the main process, and while
+	 * the cleanup waits for it to exit, its child processes lose their link
+	 * to it and each prints "Exiting due to channel error". */
 	const forward = chunk => {
+		if(done) return;
 		for(const line of chunk.toString().split('\n'))
 			if(line.trim()) console.log('firefox: ' + line);
 	};
@@ -229,8 +238,37 @@ server.listen(listenPort, '127.0.0.1', async () => {
 
 	server.on('close', () => {
 		clearTimeout(timer);
-		if(!keep) fs.rmSync(profile, {recursive: true, force: true});
-		else console.log('INFO: profile kept at ' + profile);
-		process.exit(pass ? 0 : 1);
+
+		const cleanup = () => {
+			if(!keep) removeProfile(profile);
+			else console.log('INFO: profile kept at ' + profile);
+			process.exit(pass ? 0 : 1);
+		};
+
+		/* finish() only asked Firefox to quit; it still has the profile's
+		 * databases open.  Deleting open files on NFS leaves .nfsXXXX
+		 * stand-ins behind and the directory stays busy, so wait for the
+		 * exit.  exitCode and signalCode stay null while the process runs.
+		 * The timer covers a Firefox that ignores the request: cleanup()
+		 * exits the process, so whichever fires first wins. */
+		if(firefox.exitCode === null && firefox.signalCode === null){
+			setTimeout(cleanup, 5000);
+			firefox.once('exit', cleanup);
+		}
+		else
+			cleanup();
 	});
 });
+
+/* The page decides pass or fail, not the cleanup.  A profile that won't go
+ * (a straggling Firefox child process can hold a file) is reported and left
+ * in tmp/, which git ignores. */
+function removeProfile(dir)
+{
+	try{
+		fs.rmSync(dir, {recursive: true, force: true, maxRetries: 3, retryDelay: 200});
+	}
+	catch(err){
+		console.log(`INFO: profile left at ${dir}: ${err.message}`);
+	}
+}

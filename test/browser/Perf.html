@@ -1,23 +1,25 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>das2js performance</title>
+<link rel="stylesheet" href="style.css">
 <style>
-	body { font-family: sans-serif; margin: 1em 2em; }
-	input[type=text] { width: 44em; }
-	input[type=number] { width: 4em; }
-	#status { color: #555; margin: 0.5em 0; }
-	table { border-collapse: collapse; margin-top: 1em; }
-	th, td { border: 1px solid #ccc; padding: 0.3em 0.7em; text-align: right; font-variant-numeric: tabular-nums; }
-	th { background: #f4f4f4; }
+	input[type=text] { width: min(44em, 100%); }
+	input[type=number] { width: 4.5em; }
+	#status { margin: 0.5em 0; }
 	td:first-child, th:first-child { text-align: left; }
-	#datasets { color: #555; font-size: 90%; }
-	.err { color: #a00; white-space: pre-wrap; }
+	#datasets { font-size: 90%; }
+	.err { white-space: pre-wrap; }
+	/* Twelve columns: scroll sideways rather than squeeze on a phone */
+	.scroll { overflow-x: auto; }
 </style>
 </head>
 <body>
-<h1>das2js performance</h1>
+<nav class="bar"><div><a href="index.html">&larr; das2js test pages</a></div></nav>
+<main>
+<h1>Performance</h1>
 <p>Fetch a real stream, then re-parse the same bytes from memory to separate
 the parser from the network.  Times are wall-clock milliseconds.</p>
 <form id="form">
@@ -27,6 +29,7 @@ the parser from the network.  Times are wall-clock milliseconds.</p>
 </form>
 <p id="status"></p>
 <p id="datasets"></p>
+<div class="scroll">
 <table id="results">
 	<thead><tr>
 		<th>run</th><th>bytes</th><th>chunks</th><th>wall ms</th>
@@ -36,7 +39,9 @@ the parser from the network.  Times are wall-clock milliseconds.</p>
 	</tr></thead>
 	<tbody></tbody>
 </table>
+</div>
 <pre id="err" class="err"></pre>
+</main>
 <script type="module" src="./Perf.mjs"></script>
 </body>
 </html>

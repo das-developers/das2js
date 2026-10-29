@@ -1,18 +1,20 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>das2js inspector</title>
+<link rel="stylesheet" href="style.css">
 <style>
-	body { font-family: sans-serif; margin: 1em 2em; }
-	input[type=text] { width: 40em; }
-	#status { color: #555; margin: 0.5em 0; }
-	#out { background: #f4f4f4; padding: 1em; overflow: auto; max-height: 75vh; }
-	.err { color: #a00; }
+	input[type=text] { width: min(40em, 100%); }
+	#status { margin: 0.5em 0; }
+	#out { max-height: 75vh; }
 </style>
 </head>
 <body>
-<h1>das2js inspector</h1>
+<nav class="bar"><div><a href="index.html">&larr; das2js test pages</a></div></nav>
+<main>
+<h1>Structure inspector</h1>
 <p>Point at a das stream and see its structure: every dataset, dimension and
 variable with its properties, but no data values.</p>
 <form id="form">
@@ -21,6 +23,7 @@ variable with its properties, but no data values.</p>
 </form>
 <p id="status"></p>
 <pre id="out"></pre>
+</main>
 <script type="module" src="./Inspect.mjs"></script>
 </body>
 </html>

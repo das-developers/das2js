@@ -9,6 +9,7 @@ compiling [das2C](https://github.com/das-developers/das2C) to WebAssembly, so
 parsing and value decoding happen in C and JavaScript receives typed-array
 views of the decoded values without a conversion pass.
 
+
 **Early days, but it runs.**  `make module` produces a three-file ES module
 in `build.wasm32/` (`das2js.mjs`, `das2c.mjs`, `das2c.wasm`) that fetches a
 das stream, parses it as it arrives, and hands back TypedArray views of the
@@ -20,10 +21,10 @@ live spectrogram are the planned demos.  Layout:
 
   * `src/` - the hand-written ES module, one file
   * `glue/` - a small flat C interface over das2C, the wasm export surface
-  * `test/` - the glue test (native and wasm under node) and the browser
-    tests (headless Firefox via a node runner)
-  * `deps/` - das2C and expat, pinned as git submodules and compiled in
-  * `buildfiles/` - the hand-written expat configuration for wasm32
+  * `test/` - the glue test (wasm under node) and the browser tests
+    (headless Firefox via a node runner)
+  * `deps/` - das2C, pinned as a git submodule and compiled in; it fetches
+    and builds expat and FFTW for wasm32 itself
   * `notes/` - build recipe, measurements
 
 **It is fast.**  A full day of Juno Waves burst waveforms, 505 MB of
@@ -46,3 +47,8 @@ fetches the pinned sources.
 This repository was started in 2022 and promptly went dormant.  It is active
 again as of October 2026, though if you need a working das client today,
 das2py is the mature path and this is not yet an alternative.
+
+#TODO
+Todo Add build instructions here.
+* mention that -j shouldn't be used on NFS mounted filesystems with emsdk,
+not a paragraph, just a sentence.

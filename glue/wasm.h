@@ -49,8 +49,8 @@
  *   - Everything reachable from DasWasmRdr_stream() belongs to the reader
  *     unless DasWasmRdr_take() detached it.
  *
- * Nothing here is wasm-specific; the file compiles on every platform so the
- * contract is testable natively (see test/TestWasm.c).
+ * Nothing here is wasm-specific beyond the export marking below; the file
+ * is plain C and compiles on any platform das2C does.
  */
 
 #include <das3/io.h>

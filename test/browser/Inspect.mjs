@@ -18,7 +18,7 @@ const DEFAULT_URL = '/das2C/examples/ex17_vector_noframe.d3b';
 const EXAMPLE_LIVE = 'https://space.physics.uiowa.edu/das/stream?server=dataset'
 	+ '&dataset=Juno/WAV/Survey&start_time=2017-01-01T13:00&end_time=2017-01-01T14:00';
 
-/* When the node runner is driving (make inspect, or a headless check), the
+/* When the node runner is driving (make server, or a headless check), the
  * first load's verdict is posted back like the test pages do; with a plain
  * static server the POSTs fail quietly. */
 function report(line, pass)
