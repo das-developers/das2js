@@ -290,12 +290,14 @@ SITE_FIXTURES=ex01_polar_mfe.d2t ex08_cassini_rpws_survey.d2t \
 
 dist: module
 	rm -rf $(SITE)
-	mkdir -p $(SITE)/build $(SITE)/test/img $(SITE)/das2C/examples
+	mkdir -p $(SITE)/build $(SITE)/test/img $(SITE)/das2C/examples $(SITE)/das2C/test/das_fetch
 	cp $(MODULE) $(WBD)/das2c.wasm $(JS_OUT) $(SITE)/build/
 	cp test/browser/*.html test/browser/*.css $(SITE)/test/
 	cp $(filter-out test/browser/run.mjs,$(wildcard test/browser/*.mjs)) $(SITE)/test/
 	cp test/browser/img/*.png test/browser/img/*.svg $(SITE)/test/img/
 	cp $(addprefix $(DAS2C)/examples/,$(SITE_FIXTURES)) $(SITE)/das2C/examples/
+	cp $(DAS2C)/test/das_fetch/juno_survey_0.6.json $(SITE)/das2C/test/das_fetch/
+	cp -r test/catalog $(SITE)/catalog
 	cp deploy/index.html $(SITE)/
 	cp deploy/htaccess $(SITE)/.htaccess
 ifneq ($(HTPASSWD),)

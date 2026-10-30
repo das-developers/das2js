@@ -92,7 +92,10 @@ Everything is static files; the browser does the work.
   which needs `AllowOverride AuthConfig`.  Create the password file on the
   server with `htpasswd -c /server/path/.htpasswd someuser`.
 * The pages talk to the node runner only when served from 127.0.0.1, so a
-  real server never sees their log POSTs.
+  real server never sees their log POSTs.  TestModule's login exchange
+  needs the runner's `/auth/` too and is skipped elsewhere.
+* The internal test catalog, `test/catalog/`, is staged as `catalog/`, so
+  `Catalog.html?internal=1` and TestModule's catalog checks work there too.
 * The data presets fetch from the das servers cross origin, which works
   because those servers send `Access-Control-Allow-Origin: *`.
 
