@@ -15,8 +15,8 @@
  *                to the node runner (make headless_test); implies internal
  */
 
-import {load, DasError} from '/build/das2js.mjs';
-import '/build/das-catalog-tree.mjs';     /* defines <das-catalog-tree> */
+import {load, DasError} from '../build/das2js.mjs';
+import '../build/das-catalog-tree.mjs';     /* defines <das-catalog-tree> */
 
 const tree = document.getElementById('tree');
 const info = document.getElementById('info');
@@ -26,18 +26,22 @@ const internalNote = document.getElementById('internal');
 const flatBox = document.getElementById('flat');
 
 /* See Inspect.mjs: verdicts go to the node runner when one is listening */
+/* The node runner listens on 127.0.0.1 only; elsewhere there is no /log */
+const RUNNER = location.hostname === '127.0.0.1';
+
 function report(line, pass)
 {
+	if(!RUNNER) return;
 	fetch('/log', {method: 'POST', body: line}).catch(() => {});
 	if(pass !== undefined)
 		fetch('/done', {method: 'POST', body: JSON.stringify({pass})}).catch(() => {});
 }
 
 /* Map the real https URLs a walk asks for onto the internal test catalog,
- * served at /catalog/ by run.mjs */
+ * ../catalog/ under make server and make dist alike */
 function testCatalogFetch(url, init)
 {
-	return fetch(url.replace(/^https:\/\//, '/catalog/'), init);
+	return fetch(url.replace(/^https:\/\//, '../catalog/'), init);
 }
 
 /* Text through textContent only: catalog strings come from remote servers */
@@ -53,12 +57,27 @@ const das = await load({progName: 'catalog'});
 /* Without a seed: das2C's compiled in root, opened at U. Iowa */
 const START = 'tag:das2.org,2012:site:/uiowa';
 
+/* Request types the structure inspector can read; anything else, a CDF
+ * file for instance, is offered as a download */
+const STREAM_MIME = new Set([
+	'application/vnd.das2.das2stream', 'text/vnd.das2.das2stream',
+	'application/vnd.das.stream', 'text/vnd.das.stream',
+]);
+
 let cat = null;        /* the DasCatalog shown */
 let src = null;        /* the DasCatSource in the details pane, freed on change */
 let t0 = 0;
 
 /* ************************************************************************ */
 /* Details pane */
+
+/* A link for an http(s) URL, plain text for anything else: the URL comes
+ * from a catalog, and a javascript: link would run on click */
+function link(url, text = url)
+{
+	if(!/^https?:\/\//i.test(url || '')) return text;
+	return el('a', {href: url, target: '_blank', rel: 'noopener'}, text);
+}
 
 function field(dl, name, value)
 {
@@ -77,7 +96,7 @@ function showNode(node)
 	const dl = el('dl');
 	field(dl, 'node type', `${node.type} ${node.version || ''}`.trim());
 	field(dl, 'uri', node.uri ?? '(a root, no uri)');
-	field(dl, 'loaded from', node.url);
+	field(dl, 'loaded from', link(node.url));
 	if(node.isContainer) field(dl, 'children', String(node.children.length));
 	field(dl, 'about', node.description);
 
@@ -106,9 +125,8 @@ function showSource(node)
 
 	const time = el('input', {type: 'text', placeholder: 'time, e.g. 2025-10-01T12', size: 26});
 	const out = el('pre');
-	let inspectUrl = null;
-	const view = el('button', {type: 'button', onclick: () => window.open(inspectUrl, '_blank', 'noopener')},
-		'Fetch and View Structure');
+	let target = null;
+	const view = el('button', {type: 'button', onclick: () => window.open(target, '_blank', 'noopener')});
 	const viewP = el('p', {}, view);
 
 	/* Rebuild the URL whenever either control changes.  das2C reads
@@ -120,7 +138,10 @@ function showSource(node)
 			const req = src.request(Number(pick.value), settings);
 			out.className = '';
 			out.textContent = req.url + (req.mime ? `\n\n${req.mime}` : '');
-			inspectUrl = 'Inspect.html?url=' + encodeURIComponent(req.url);
+			/* No type given: older das2 nodes, whose output is a das2 stream */
+			const stream = !req.mime || STREAM_MIME.has(req.mime);
+			target = stream ? 'Inspect.html?url=' + encodeURIComponent(req.url) : req.url;
+			view.textContent = stream ? 'Fetch and View Structure' : 'Download';
 			viewP.hidden = false;
 		}
 		catch(e){
@@ -143,8 +164,9 @@ function showEntry(parent, entry)
 	freeSource();
 	const dl = el('dl');
 	field(dl, 'node type', `${entry.stub.type || '?'} (not a type this das2C loads)`);
-	field(dl, 'listed in', parent.uri ?? parent.url);
-	field(dl, 'urls', entry.urls.join('\n'));
+	field(dl, 'listed in', link(parent.url, parent.uri ?? parent.url));
+	if(entry.urls.length)
+		field(dl, 'urls', el('div', {}, ...entry.urls.map(u => el('div', {}, link(u)))));
 	field(dl, 'provides', entry.provides.join(', '));
 	field(dl, 'about', entry.description);
 	info.replaceChildren(el('h3', {}, entry.title || entry.label), dl);
@@ -264,6 +286,14 @@ async function selfCheck()
 	if(sel.row.hasAttribute('aria-expanded') || sel.row.parentElement.querySelector('ul'))
 		throw new Error('MSC BAC row still drawn as a container');
 	const srcUri = sel.node.uri;
+
+	/* Its second example asks for CDF, which can only be downloaded */
+	const pick = info.querySelector('select');
+	const button = () => info.querySelector('button').textContent;
+	if(button() !== 'Fetch and View Structure') throw new Error(`example 0 button '${button()}'`);
+	pick.value = '1';
+	pick.dispatchEvent(new Event('change'));
+	if(button() !== 'Download') throw new Error(`CDF example button '${button()}'`);
 	const SA = 'SpecAnalyzer-4s-Efield';
 
 	/* no-collapse redraws the tree; the Collection must then open as one */
@@ -280,6 +310,18 @@ async function selfCheck()
 	if(sel.node.kind !== 'collection' || sel.row.getAttribute('aria-expanded') !== 'true')
 		throw new Error(`with no-collapse ${SA} gave a ${sel.node.kind}`);
 	const nColl = at.querySelectorAll(':scope > li > [part=row]').length;
+
+	/* An entry das2C can't load: its pane links the listing and each URL */
+	at = tree.shadowRoot.querySelector('ul');
+	for(const lbl of ['Tracers', 'TRACERS-1', 'L2', 'MSC BAC']){
+		sel = await clickRow(at, lbl);
+		at = sel.row.parentElement.querySelector(':scope > ul');
+	}
+	sel = await clickRow(at, 'Das2 DSDF');
+	if(sel.node !== null) throw new Error(`Das2 DSDF loaded as a ${sel.node.kind}`);
+	const hrefs = Array.from(info.querySelectorAll('a'), a => a.href);
+	if(!hrefs.some(h => h.endsWith('/l2/msc_bac.json')) || !hrefs.some(h => h.endsWith('/l2/msc_bac/das2.d2t')))
+		throw new Error(`entry pane links: ${hrefs.join(' ')}`);
 
 	/* The rare case, from the hand-made test/catalog/local/srcsets.json: a
 	 * SourceSet with two usable sources is drawn as a source until opened,
@@ -304,7 +346,7 @@ async function selfCheck()
 		throw new Error(`seeded MSC BAC gave a ${sel.node.kind} / ${sel.entry.name}`);
 
 	return `opened ${top.uri}, ${n} rows; down to L2, MSC BAC collapsed to ${srcUri}; `
-		+ `with no-collapse ${SA} opened with ${nColl} row(s); `
+		+ `with no-collapse ${SA} opened with ${nColl} row(s), the DSDF entry linked; `
 		+ `a two-source set drawn as a source opened with ${nTwo}`;
 }
 

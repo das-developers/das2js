@@ -440,7 +440,7 @@ function fixtureFetch(url, init)
 	if(url.includes('//hang.invalid/'))
 		return new Promise((_, reject) =>
 			init.signal.addEventListener('abort', () => reject(init.signal.reason)));
-	return fetch(url.replace(/^https:\/\//, '/catalog/'), init);
+	return fetch(url.replace(/^https:\/\//, '../catalog/'), init);
 }
 
 async function expectThrow(pr, re, msg)
@@ -501,6 +501,8 @@ async function catalogChecks(d)
 			+ 'tracers/tracers-1/l2/msc_bac/flex?'), `request url ${freq.url}`);
 		check(freq.url.includes('read.time.min=2025-10-01T12%3A00%3A00'), `time not in ${freq.url}`);
 		log(`INFO: catalog: request ${freq.url} (${freq.mime || 'no mime'})`);
+		const cdf = fs.request(1);
+		check(cdf.mime === 'application/x-cdf', `CDF example mime '${cdf.mime}'`);
 		fs.free();
 	}
 
@@ -518,7 +520,7 @@ async function catalogChecks(d)
 	/* loadSource, on das2C's own Juno 0.6 test node: one that names its realm */
 	{
 		const JUNO = 'https://fixture.invalid/juno_survey_0.6.json';
-		const fx = (url, init) => fetch(url.replace('https://fixture.invalid/', '/das2C/test/das_fetch/'), init);
+		const fx = (url, init) => fetch(url.replace('https://fixture.invalid/', '../das2C/test/das_fetch/'), init);
 		const js = await d.loadSource(JUNO, {fetch: fx});
 		check(js.needsAuth && js.authRealm === 'Juno Magnetospheric Working Group',
 			`Juno login ${js.needsAuth}, realm '${js.authRealm}'`);
@@ -586,6 +588,13 @@ async function authChecks(d)
 	try{ basicAuth('a:b', 'c'); }
 	catch(e){ threw = (e instanceof DasError); }
 	check(threw, "basicAuth took a user name with ':'");
+
+	/* The /auth/ server is the node runner's; elsewhere only the encoding
+	 * is checked */
+	if(!RUNNER){
+		log('INFO: login: no test runner here, exchange not tried');
+		return d;
+	}
 
 	const host = location.hostname === 'localhost' ? '127.0.0.1' : 'localhost';
 	const url = `http://${host}:${location.port}/auth/examples/ex17_vector_noframe.d3b`;
