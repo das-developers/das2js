@@ -1,0 +1,396 @@
+{
+  "label": "MSC BAC",
+  "name": "TS1_L2_MSC_BAC",
+  "title": "TRACERS-1 MSC: Magnetic Field, 2 kHz Level 2",
+  "type": "HttpStreamSrc",
+  "version": "0.7",
+  "contacts": [
+    {
+      "type": "maintainer",
+      "name": "Chris Piker"
+    },
+    {
+      "type": "scientific",
+      "name": "George Hospodarsky"
+    }
+  ],
+  "protocol": {
+    "method": "GET",
+    "convention": "HTTP/1.1",
+    "baseUrls": [
+      "https://space.physics.uiowa.edu/das/stream/source/tracers/tracers-1/l2/msc_bac/flex"
+    ],
+    "authorization": {
+      "required": false
+    },
+    "httpParams": {
+      "read.time.min": {
+        "required": true,
+        "type": "isotime"
+      },
+      "read.time.max": {
+        "required": true,
+        "type": "isotime"
+      },
+      "read.data": {
+        "type": "FlagSet",
+        "required": false,
+        "flagSep": ",",
+        "flags": {
+          "ts1_l2_bac_tscs": {
+            "value": "ts1_l2_bac_tscs"
+          },
+          "ts1_l2_bac_fac": {
+            "value": "ts1_l2_bac_fac"
+          }
+        }
+      },
+      "format.type": {
+        "required": false,
+        "type": "enum",
+        "enum": [
+          "das",
+          "csv",
+          "cdf"
+        ]
+      },
+      "format.secfrac": {
+        "required": false,
+        "type": "integer",
+        "range": [
+          0,
+          9
+        ]
+      },
+      "format.sigdigit": {
+        "required": false,
+        "type": "integer",
+        "range": [
+          2,
+          17
+        ]
+      },
+      "format.delim": {
+        "required": false,
+        "type": "string"
+      },
+      "format.headers": {
+        "required": false,
+        "type": "boolean"
+      },
+      "format.csv.props": {
+        "required": false,
+        "type": "boolean"
+      },
+      "format.csv.dsid": {
+        "required": false,
+        "type": "boolean"
+      },
+      "format.cdf.nocomp": {
+        "required": false,
+        "type": "boolean"
+      },
+      "format.serial": {
+        "label": "Serialization",
+        "required": false,
+        "type": "enum",
+        "enum": [
+          "text",
+          "binary"
+        ]
+      },
+      "format.version": {
+        "required": false,
+        "type": "string"
+      }
+    }
+  },
+  "interface": {
+    "coords": {
+      "time": {
+        "label": "Time",
+        "props": {
+          "min": {
+            "label": "Minimum",
+            "value": null,
+            "title": "Minimum time value to stream",
+            "set": {
+              "param": "read.time.min",
+              "required": true
+            }
+          },
+          "max": {
+            "label": "Maximum",
+            "value": null,
+            "title": "Maximum time value to stream",
+            "set": {
+              "param": "read.time.max",
+              "required": true
+            }
+          },
+          "units": {
+            "value": "UTC"
+          }
+        },
+        "validRange": [
+          "2025-09-26T01:54",
+          "2026-07-14T22:22"
+        ]
+      }
+    },
+    "examples": [
+      {
+        "settings": {
+          "coords/time/props/min": "2026-07-14T22:11",
+          "coords/time/props/max": "2026-07-14T22:22"
+        },
+        "label": "Most Recent 10 minutes"
+      },
+      {
+        "settings": {
+          "coords/time/props/min": "2026-07-13T22:21",
+          "coords/time/props/max": "2026-07-14T22:22",
+          "formats/cdf/props/enabled": true
+        },
+        "label": "Most Recent Day (CDF)"
+      }
+    ],
+    "formats": {
+      "das": {
+        "label": "das stream",
+        "title": "Streaming format for plots",
+        "mimeTypes": [
+          "application/vnd.das2.das2stream",
+          "application/vnd.das.stream",
+          "text/vnd.das2.das2stream",
+          "text/vnd.das.stream"
+        ],
+        "props": {
+          "enabled": {
+            "type": "boolean",
+            "xorGroup": "format",
+            "value": true,
+            "set": {
+              "value": true,
+              "param": "format.type",
+              "pval": "das"
+            }
+          },
+          "version": {
+            "label": "Stream Version",
+            "value": "das3",
+            "type": "enum",
+            "set": {
+              "param": "format.version",
+              "enum": [
+                {
+                  "value": "das3",
+                  "pval": "3"
+                },
+                {
+                  "value": "das2",
+                  "pval": "2"
+                }
+              ]
+            }
+          },
+          "serial": {
+            "label": "Serialization",
+            "value": "binary",
+            "set": {
+              "param": "format.serial",
+              "enum": [
+                {
+                  "value": "text"
+                },
+                {
+                  "value": "binary"
+                }
+              ]
+            }
+          },
+          "fracSecs": {
+            "label": "Fractional Seconds",
+            "title": "Number of fractional seconds digits in text streams",
+            "value": 3,
+            "set": {
+              "param": "format.secfrac"
+            }
+          },
+          "sigDigits": {
+            "label": "Significant Digits",
+            "title": "General significant digits for values in text streams",
+            "value": 5,
+            "set": {
+              "param": "format.sigdigit"
+            }
+          }
+        },
+        "order": [
+          "enabled",
+          "version",
+          "serial",
+          "sigDigits",
+          "fracSecs"
+        ]
+      },
+      "csv": {
+        "label": "CSV stream",
+        "title": "(Comma) Separated Values for export",
+        "mimeTypes": [
+          "text/csv"
+        ],
+        "props": {
+          "enabled": {
+            "type": "boolean",
+            "xorGroup": "format",
+            "value": false,
+            "set": {
+              "value": true,
+              "param": "format.type",
+              "pval": "csv"
+            }
+          },
+          "attributes": {
+            "value": false,
+            "type": "boolean",
+            "label": "Attributes",
+            "title": "Output data object property rows",
+            "set": {
+              "value": true,
+              "param": "format.csv.props",
+              "pval": "1"
+            }
+          },
+          "headers": {
+            "value": true,
+            "type": "boolean",
+            "label": "Headers",
+            "title": "Output column headers",
+            "set": {
+              "value": false,
+              "param": "format.headers",
+              "pval": "false"
+            }
+          },
+          "datasetIds": {
+            "value": true,
+            "type": "boolean",
+            "label": "Dataset IDs",
+            "title": "Output the dataset ID column",
+            "set": {
+              "value": false,
+              "param": "format.csv.dsid",
+              "pval": "false"
+            }
+          },
+          "delimiter": {
+            "value": "Comma",
+            "type": "enum",
+            "label": "Value Separator",
+            "set": {
+              "param": "format.delim",
+              "enum": [
+                {
+                  "value": "Comma",
+                  "pval": ","
+                },
+                {
+                  "value": "Tab",
+                  "pval": "\t"
+                }
+              ]
+            }
+          },
+          "fracSecs": {
+            "label": "Fractional Seconds",
+            "title": "Number of fractional seconds digits in text streams",
+            "value": 3,
+            "set": {
+              "param": "format.secfrac"
+            }
+          },
+          "sigDigits": {
+            "label": "Significant Digits",
+            "title": "General significant digits for values in text streams",
+            "value": 5,
+            "set": {
+              "param": "format.sigdigit"
+            }
+          }
+        },
+        "order": [
+          "enabled",
+          "attributes",
+          "headers",
+          "datasetIds",
+          "delimiter",
+          "fracSecs",
+          "sigDigits"
+        ]
+      },
+      "cdf": {
+        "label": "CDF file",
+        "title": "NASA Common Data Format",
+        "mimeTypes": [
+          "application/x-cdf"
+        ],
+        "props": {
+          "enabled": {
+            "type": "boolean",
+            "xorGroup": "format",
+            "value": false,
+            "set": {
+              "value": true,
+              "param": "format.type",
+              "pval": "cdf"
+            }
+          },
+          "nocompress": {
+            "value": false,
+            "type": "boolean",
+            "label": "No-Compression",
+            "title": "Do not compress variables, needed for PDS compliant output.",
+            "set": {
+              "value": true,
+              "param": "format.cdf.nocomp",
+              "pval": "1"
+            }
+          }
+        }
+      }
+    },
+    "data": {
+      "ts1_l2_bac_tscs": {
+        "label": "B!ac!n in TS1_TSCS",
+        "title": "AC Magnetic field at 2048 Hz in TRACERS Spacecraft Coordinates (TSCS)",
+        "props": {
+          "enabled": {
+            "type": "boolean",
+            "value": true,
+            "set": {
+              "value": true,
+              "param": "read.data",
+              "flag": "ts1_l2_bac_tscs"
+            }
+          }
+        }
+      },
+      "ts1_l2_bac_fac": {
+        "label": "B!ac!n in TS1_FAC",
+        "title": "AC Magnetic field at 2048 Hz in B-Field Aligned Coordinates (FAC)",
+        "props": {
+          "enabled": {
+            "type": "boolean",
+            "value": false,
+            "set": {
+              "value": true,
+              "param": "read.data",
+              "flag": "ts1_l2_bac_fac"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "type": "SourceSet",
+  "version": "0.1",
+  "coords": {
+    "time": {
+      "label": "Time",
+      "validRange": [
+        "2024-01-01T00:00",
+        "2025-07-22T00:00"
+      ]
+    }
+  },
+  "data": {
+    "tscs": {
+      "label": "TSCS"
+    },
+    "mag": {
+      "label": "MAG"
+    }
+  },
+  "contacts": [
+    {
+      "type": "scientific",
+      "name": "Ivar Christopher"
+    }
+  ],
+  "catalog": {
+    "das2": {
+      "type": "Das2DSDF",
+      "purpose": "primary-stream",
+      "label": "Das2 DSDF",
+      "description": "A variable resolution data source description with optional parameters accessed via a static API",
+      "mime": "text/vnd.das2.das2stream",
+      "provides": [
+        "application/vnd.das2.das2stream"
+      ],
+      "urls": [
+        "https://space.physics.uiowa.edu/das/stream/source/tracers/tracers-1/spice/igrf/das2.d2t"
+      ]
+    },
+    "flex": {
+      "type": "HttpStreamSrc",
+      "purpose": "primary-stream",
+      "label": "DasFlex Source",
+      "description": "A successor to das2 DSDFs. Provides multiple output formats and dataset operations along with a user interface definition.",
+      "mime": "application/json",
+      "provides": [
+        "application/x-cdf",
+        "application/vnd.das2.das2stream",
+        "application/vnd.das.stream",
+        "text/vnd.das2.das2stream",
+        "text/csv"
+      ],
+      "urls": [
+        "https://space.physics.uiowa.edu/das/stream/source/tracers/tracers-1/spice/igrf/flex.json"
+      ]
+    }
+  },
+  "name": "ts2_igrf_coords",
+  "label": "IGRF",
+  "title": "TRACERS 2 Geomagnetic Location Coordinates"
+}

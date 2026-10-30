@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>das2js catalog browser</title>
+<link rel="stylesheet" href="style.css">
+<style>
+	:root { --page: 1280px; }
+
+	form { display: flex; flex-wrap: wrap; gap: 0.6em; align-items: center; }
+	#seed { flex: 1 1 28em; }
+	#status { margin: 0.5em 0; }
+
+	/* Tree on the left, details on the right; stacked on a phone */
+	.panes {
+		display: grid;
+		grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+		gap: 16px;
+		align-items: start;
+	}
+	@media (max-width: 760px) { .panes { grid-template-columns: 1fr; } }
+	.pane {
+		background: var(--panel);
+		border: 1px solid var(--line);
+		border-radius: 10px;
+		padding: 0.6em 0.8em;
+		min-height: 10em;
+	}
+	#tree { max-height: 75vh; overflow: auto; }
+
+	/* The tree element draws in its own shadow root; these custom
+	 * properties are how a page themes it, see src/das-catalog-tree.mjs */
+	das-catalog-tree {
+		--das-tree-muted: var(--muted);
+		--das-tree-hover: var(--hover);
+		--das-tree-accent: var(--gold);
+		--das-tree-source: var(--blue);
+		--das-tree-error: var(--err);
+		--das-tree-line: var(--line);
+	}
+
+	#info h3 { margin: 0.2em 0 0.4em; font-size: 1.15em; color: var(--text); }
+	#info dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.2em 0.8em; margin: 0.6em 0; }
+	#info dt { color: var(--muted); }
+	#info dd { margin: 0; overflow-wrap: anywhere; }
+	#info select, #info input[type=text] { max-width: 100%; }
+	#info pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+	.badge { color: var(--gold); font-weight: 600; }
+</style>
+</head>
+<body>
+<nav class="bar"><div><a href="index.html">&larr; das2js test pages</a></div></nav>
+<main>
+<h1>Catalog browser</h1>
+<p>Walk the das federated catalog.  Each level is fetched when it is opened;
+das2C picks the child, falls back to the next mirror, and builds request
+URLs for data sources.  A blank seed starts at das2C's compiled in root
+and opens <code>site:/uiowa</code>.  A Collection or SourceSet is shown as
+the one source das2C can use in it; the rare one holding several opens as
+a folder when clicked.</p>
+<form id="form">
+	<input type="text" id="seed" placeholder="seed node URL, blank for the compiled in root">
+	<label><input type="checkbox" id="flat"> no collapse</label>
+	<button type="submit">Set Seed</button>
+</form>
+<p id="internal" class="badge" hidden>Using the internal test catalog: a
+partial copy in <code>test/catalog/</code>.  Branches outside it will fail;
+data requests still go to the live servers.</p>
+<p id="status"></p>
+<div class="panes">
+	<das-catalog-tree class="pane" id="tree"></das-catalog-tree>
+	<div class="pane" id="info"></div>
+</div>
+</main>
+<script type="module" src="./Catalog.mjs"></script>
+</body>
+</html>

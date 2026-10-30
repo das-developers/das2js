@@ -1,0 +1,48 @@
+{
+   "catalog": {
+      "specanalyzer-1hour-efield": {
+         "name": "SpecAnalyzer-1hour-Efield",
+         "title": "Filtered 1-hour Electric Field averages and peaks from the Voyager 1 PWS Spectrum Analyzer",
+         "type": "Collection",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/voyager/1/pws/specanalyzer-1hour-efield.json"
+         ]
+      },
+      "specanalyzer-4s-efield": {
+         "name": "SpecAnalyzer-4s-Efield",
+         "title": "Electric Field averages and peaks from the Voyager 1 PWS Spectrum Analyzer",
+         "type": "Collection",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/voyager/1/pws/specanalyzer-4s-efield.json"
+         ]
+      },
+      "specanalyzer-test": {
+         "name": "SpecAnalyzer-Test",
+         "title": "Electric Field averages and peaks from the Voyager 1 PWS Spectrum Analyzer",
+         "type": "Collection",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/voyager/1/pws/specanalyzer-test.json"
+         ]
+      },
+      "uncalibrated": {
+         "name": "Uncalibrated",
+         "title": "Raw PWS instrument values",
+         "type": "Catalog",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/voyager/1/pws/uncalibrated.json"
+         ]
+      },
+      "wsk": {
+         "name": "wsk",
+         "title": null,
+         "type": "Catalog",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/voyager/1/pws/wsk.json"
+         ]
+      }
+   },
+   "name": "PWS",
+   "title": "Plasma Wave System - University of Iowa (Don Gurnett)",
+   "type": "Catalog",
+   "version": "0.5"
+}

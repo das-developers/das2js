@@ -97,15 +97,22 @@
 	<p class="lead">Each reports pass or fail on the page, and in the terminal
 	too when run under <code>make server</code>.</p>
 	<div class="cards">
+		<a class="page" href="Perf.html">
+			<strong>Performance</strong>
+			<span>Simultaneously fetch and render a live stream. 
+			Tests network, parse and render times. Provides stats for
+			a quick test and a half GB browser hammer.</span>
+		</a>
 		<a class="page" href="TestModule.html">
 			<strong>Module test</strong>
-			<span>The module against the local stream fixtures, no network.
-			Same page as <code>make headless_test</code>.</span>
+			<span>Run the module against builtin streams, no network
+			required.  Produces the same page as
+			<code>make headless_test</code>.</span>
 		</a>
 		<a class="page" href="TestLive.html">
-			<strong>Live server test</strong>
-			<span>A real request to the dasFlex server at
-			space.physics.uiowa.edu, or to the sibling dasFlex when served with
+			<strong>Fetch only</strong>
+			<span>A real request an online dasFlex server or to as 
+			local sibling next door when served with
 			<code>RUNFLAGS=--dasflex</code>.  Same page as
 			<code>make live_test</code>.</span>
 		</a>
@@ -113,17 +120,16 @@
 
 	<h2>Tools</h2>
 	<div class="cards">
+		<a class="page" href="Catalog.html">
+			<strong>Catalog browser</strong>
+			<span>Walk the das federated catalog a level at a time and turn a
+			data source's examples into request URLs.</span>
+		</a>
 		<a class="page" href="Inspect.html">
-			<strong>Structure inspector</strong>
+			<strong>Stream inspector</strong>
 			<span>Load any stream URL and see every dataset, dimension and
 			variable as JSON, without the data values.  <code>?url=...</code>
 			bookmarks a stream.</span>
-		</a>
-		<a class="page" href="Perf.html">
-			<strong>Performance</strong>
-			<span>Fetch a live stream, then re-parse the same bytes from memory,
-			so parser time shows separately from the network.  From a quick
-			test to a 505 MB day that hammers your browser.</span>
 		</a>
 	</div>
 </main>

@@ -1,0 +1,26 @@
+{
+   "catalog": {
+      "site": {
+         "name": "Sites",
+         "title": "Federated Site Catalog",
+         "type": "Catalog",
+         "urls": [
+            "https://das2.org/catalog/das/site.json"
+         ]
+      },
+      "test": {
+         "name": "das2 test sites",
+         "title": "Root test Catalog",
+         "type": "Catalog",
+         "urls": [
+            "https://das2.org/catalog/das/test.json"
+         ]
+      }
+   },
+   "description": "The das2 URIs denote paths in a federated catalog that may have nodes leading to many different organizations and servers. Paths start with the Scheme URI, followed by the ROOT designator and then a posix style path that leads to a node. Sub-node information (infact individual keys) can be indicated by adding a FRAGMENT separator and then the path to the designated object. Each root defines an organizational scheme. At present only the 'site:' root designator is used. Unlike VOTable objects and HAPI nodes, Das2 Catalogs do not provide details of the internals of each dataset.",
+   "name": "das2",
+   "separator": null,
+   "title": "Federated Das2 Catalog",
+   "type": "Catalog",
+   "version": "0.5"
+}

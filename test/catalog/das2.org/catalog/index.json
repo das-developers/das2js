@@ -1,0 +1,34 @@
+{
+   "catalog": {
+      "tag:cdaweb.sci.gsfc.nasa.gov,2018:": {
+         "name": "CDAWeb",
+         "title": "NASA Goddard Spaceflight Center Data Sites",
+         "type": "Catalog",
+         "urls": [
+            "https://das2.org/catalog/cdaweb.json"
+         ]
+      },
+      "tag:das2.org,2012:": {
+         "name": "das2",
+         "title": "Federated Das2 Catalog",
+         "type": "Catalog",
+         "urls": [
+            "https://das2.org/catalog/das.json"
+         ]
+      },
+      "tag:spase-group.org,2018:spase://": {
+         "name": "SPASE",
+         "title": "Space Physics Archive Search and Extract (SPASE) Metadata Registry",
+         "type": "Catalog",
+         "urls": [
+            "https://das2.org/catalog/spase.json"
+         ]
+      }
+   },
+   "description": "This the root das2 catalog. All paths below here are assumed to be valid URIs. According to RFC 3986 strings starting with \"pds:\", \"spase:\", \"vap+\", \"das:\" etc. are niether URIs nor URNs as these have not been registered in accordance with RFC 7595 or RFC 8254. This is easy to fix, all that's required is to prefix these schemes with any valid tag URI. Since it seems presumptuous to use tag:das2.org,2012: for items that are clearly owned by others, this root catalog contains a global list of URI prefixes to be used a seed paths.",
+   "name": "Root",
+   "separator": null,
+   "title": "Root Path List",
+   "type": "Catalog",
+   "version": "0.5"
+}

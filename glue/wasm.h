@@ -44,8 +44,11 @@
  * Ownership rules, uniform by prefix:
  *   - daswasm_var_ary() lends a pointer, never free it.
  *   - daswasm_var_qube() allocates, release with daswasm_ary_free().
- *   - daswasm_ary_times(), daswasm_ary_doubles(), daswasm_ds_json() and
- *     daswasm_desc_json() allocate, release with daswasm_free().
+ *   - daswasm_ary_times(), daswasm_ary_doubles(), daswasm_ds_json(),
+ *     daswasm_desc_json() and daswasm_node_json() allocate, release with
+ *     daswasm_free().
+ *   - Catalog nodes belong to the tree they were loaded into, see
+ *     das3/node.h.
  *   - Everything reachable from DasWasmRdr_stream() belongs to the reader
  *     unless DasWasmRdr_take() detached it.
  *
@@ -56,6 +59,7 @@
 #include <das3/io.h>
 #include <das3/builder.h>
 #include <das3/dataset.h>
+#include <das3/source.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -493,6 +497,40 @@ DAS_WASM_API char* daswasm_ds_json(DasDs* pDs);
 /** The properties of any descriptor (a stream, usually) as JSON, in the
  * props form described at daswasm_ds_json().  Free with daswasm_free(). */
 DAS_WASM_API char* daswasm_desc_json(const DasDesc* pDesc);
+
+/* ************************************************************************ */
+/* Catalog nodes
+ *
+ * The catalog API in das3/node.h and das3/source.h is flat already, so the
+ * module exports most of it straight from libdas3.a (see the Makefile).
+ * What is added here is the snapshot, for the same reason datasets have
+ * one: a node does not change once loaded.
+ */
+
+/** A catalog node and its child listing as one JSON document.
+ *
+ *   node     ptr, kind, type, version, name, label, title, description,
+ *            uri, url, separator, children, loadable
+ *   child    name, kind, stub
+ *
+ *   kind       das_node_type_e without its prefix: "catalog", "collection",
+ *              "srcset", "stream_src", "file_agg", "spdf_cat", "spase_cat",
+ *              or "inv" for a type this das2C does not know
+ *   type       the document's own "type" string, unknown ones included
+ *   uri        null for a root
+ *   separator  null when the node is not a container, "" when its
+ *              document says null
+ *   stub       the container's entry for the child, verbatim
+ *   loadable   names of the children das2C can build a source from, see
+ *              dassrc_loadable()
+ *
+ * Absent string fields are null.
+ *
+ * @returns a NUL terminated UTF-8 string the caller frees with
+ *          daswasm_free(), or NULL on error (see daswasm_lastError)
+ * @memberof DasNode
+ */
+DAS_WASM_API char* daswasm_node_json(const DasNode* pNode);
 
 /** @} */
 

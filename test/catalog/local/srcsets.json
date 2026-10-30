@@ -1,0 +1,25 @@
+{
+   "type": "Catalog",
+   "version": "0.5",
+   "name": "SourceSets",
+   "title": "Hand-made test node: a SourceSet with one usable source, one with two",
+   "separator": "/",
+   "catalog": {
+      "one": {
+         "type": "SourceSet",
+         "label": "MSC BAC",
+         "title": "The TRACERS-1 L2 MSC BAC set: flex and a das2 DSDF, only flex usable",
+         "urls": [
+            "https://space.physics.uiowa.edu/das/stream/source/tracers/tracers-1/l2/msc_bac.json"
+         ]
+      },
+      "two": {
+         "type": "SourceSet",
+         "label": "Two das2",
+         "title": "Two usable sources, so the tree must open it as a container",
+         "urls": [
+            "https://local/two_src.json"
+         ]
+      }
+   }
+}

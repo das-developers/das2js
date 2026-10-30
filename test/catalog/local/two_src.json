@@ -1,0 +1,23 @@
+{
+   "type": "SourceSet",
+   "version": "0.1",
+   "name": "TWO_DAS2",
+   "label": "Two das2",
+   "title": "Hand-made test node: two HttpStreamSrc children, both the Voyager 1 PWS one",
+   "catalog": {
+      "das2": {
+         "type": "HttpStreamSrc",
+         "label": "Das2/2.2 Source",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/voyager/1/pws/specanalyzer-4s-efield/das2.json"
+         ]
+      },
+      "das2_copy": {
+         "type": "HttpStreamSrc",
+         "label": "Das2/2.2 Source, again",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/voyager/1/pws/specanalyzer-4s-efield/das2.json"
+         ]
+      }
+   }
+}

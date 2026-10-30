@@ -61,6 +61,7 @@ const TYPED_ARRAYS = {
 };
 
 const UTF8 = new TextDecoder('utf-8');
+const UTF8E = new TextEncoder();   /* always UTF-8, it takes no argument */
 
 /* ************************************************************************ */
 
@@ -172,6 +173,36 @@ export class DasRuntime {
 			renIsLog:      w('DasRender_isLog', N, [N, N]),
 			renUnits:      w('DasRender_units', S, [N, N]),
 			delRen:        w('del_DasRender', null, [N]),
+
+			/* Catalog: everything but the snapshot is das2C's own API,
+			 * exported straight from libdas3.a (see DAS2C_EXPORTS in the
+			 * Makefile).  Pointers that may be NULL come back as 'number' and
+			 * are decoded by cString(), since 'string' turns NULL into ''. */
+			nodeJson:      w('daswasm_node_json', N, [N]),
+			nodeNew:       w('new_DasNode_json', N, [N, N, S, S]),
+			nodeDel:       w('del_DasNode', null, [N]),
+			walkNew:       w('new_DasNodeWalk', N, [N, S]),
+			walkSeed:      w('new_DasNodeWalk_seed', N, []),
+			walkDel:       w('del_DasNodeWalk', null, [N]),
+			walkState:     w('DasNodeWalk_state', N, [N]),
+			walkUrl:       w('DasNodeWalk_url', S, [N, N]),
+			walkUri:       w('DasNodeWalk_uri', S, [N]),
+			walkFeed:      w('DasNodeWalk_feed', N, [N, N, N, N, S]),
+			walkFail:      w('DasNodeWalk_fail', null, [N, N, S]),
+			walkResult:    w('DasNodeWalk_result', N, [N]),
+			walkNearest:   w('DasNodeWalk_nearest', N, [N, N]),
+			srcNew:        w('new_DasSrc_node', N, [N]),
+			srcDel:        w('del_DasSrc', null, [N]),
+			srcTitle:      w('DasSrc_title', N, [N]),
+			srcNeedsAuth:  w('DasSrc_needsAuth', 'boolean', [N]),
+			srcAuthRealm:  w('DasSrc_authRealm', N, [N]),
+			srcExCount:    w('DasSrc_exampleCount', N, [N]),
+			srcExLabel:    w('DasSrc_exampleLabel', S, [N, N]),
+			srcNewReq:     w('DasSrc_newReq', N, [N, N]),
+			srcMime:       w('DasSrc_mime', S, [N, N]),
+			srcUrl:        w('DasStreamSrc_url', N, [N, N, N, N, N]),
+			reqDel:        w('del_DasReq', null, [N]),
+			reqSet:        w('DasReq_set', N, [N, S, S]),
 		};
 
 		this.#c.init(progName);
@@ -246,6 +277,34 @@ export class DasRuntime {
 	/** A raster painter of the given size in pixels, see DasRender */
 	newRender(width, height){ return new DasRender(this, width, height); }
 
+	/** A catalog session: a tree of das catalog nodes loaded on demand.
+	 * See DasCatalog for the options. */
+	newCatalog(opts = {}){ return new DasCatalog(this, opts); }
+
+	/** A data source straight from the URL of its node, no catalog walk.
+	 *
+	 *   const src = await das.loadSource('https://das2.org/catalog/das/site/'
+	 *       + 'uiowa/voyager/1/pws/specanalyzer-4s-efield/das2.json');
+	 *   const {url} = src.request(0, {time: '2014-08-31T12'});
+	 *   src.free();
+	 *
+	 * Options: uri, the catalog URI the node stands for; fetch and timeout
+	 * as for DasCatalog.
+	 * @returns {Promise<DasCatSource>}, which the caller frees
+	 * @throws {DasError} if the URL fails or holds a container node */
+	async loadSource(url, opts = {})
+	{
+		const cat = new DasCatalog(this, {fetch: opts.fetch, timeout: opts.timeout,
+			seed: url, seedUri: opts.uri});
+		try{
+			const node = await cat.root();
+			if(!node.isSource)
+				throw new DasError(`${url} is a ${node.type} node, not a data source`);
+			return node.source();   /* a copy, so it outlives cat */
+		}
+		finally{ cat.free(); }
+	}
+
 	/** Fetch a URL and parse the response body as a das stream.
 	 *
 	 * This is the common path and shows the intended use of DasReader: the
@@ -286,7 +345,7 @@ export class DasRuntime {
 		}
 		if(!resp.ok)
 			throw new DasError(`HTTP ${resp.status} ${resp.statusText} for ${url}`,
-			                    await this.#errorBody(resp));
+			                    await this.#errorBody(resp), httpInfo(resp));
 
 		const rdr = this.newReader();
 		let nBytes = 0;
@@ -336,14 +395,46 @@ export class DasRuntime {
 
 /** Thrown for parse failures and HTTP errors.  The das2C message, if any,
  * is in .message; a server's in-band exception text (NoDataInInterval and
- * friends) rides along in .exception. */
+ * friends) rides along in .exception.
+ *
+ * For HTTP errors, .status is the status code (0 otherwise) and .realm the
+ * login realm from a 401's WWW-Authenticate header.  Across origins a
+ * script only sees that header if the server lists it in
+ * Access-Control-Expose-Headers; when it doesn't, .realm is null. */
 export class DasError extends Error {
-	constructor(msg, exception = '')
+	constructor(msg, exception = '', {status = 0, realm = null} = {})
 	{
 		super(msg);
 		this.name = 'DasError';
 		this.exception = exception;
+		this.status = status;
+		this.realm = realm;
 	}
+}
+
+/* The DasError fields for an HTTP reply */
+function httpInfo(resp)
+{
+	const m = /realm="([^"]*)"/i.exec(resp.headers.get('WWW-Authenticate') || '');
+	return {status: resp.status, realm: m ? m[1] : null};
+}
+
+/** The Authorization header value for HTTP Basic auth, for fetchStream's
+ * headers option:
+ *
+ *   d.fetchStream(url, {headers: {Authorization: basicAuth(user, pass)}})
+ *
+ * Send it to https URLs only: base64 is an encoding, not encryption.
+ *
+ * @throws {DasError} if user contains ':', which Basic auth can't carry */
+export function basicAuth(user, password)
+{
+	if(user.includes(':'))
+		throw new DasError("A user name for Basic auth can't contain ':'");
+	/* UTF-8 first: btoa() alone throws past U+00FF and sends Latin-1 below */
+	let bin = '';
+	for(const b of UTF8E.encode(`${user}:${password}`)) bin += String.fromCharCode(b);
+	return 'Basic ' + btoa(bin);
 }
 
 /* ************************************************************************ */
@@ -1260,5 +1351,474 @@ export class DasVar {
 		const a = new Array(n);
 		for(let i = 0; i < n; ++i) a[i] = c.aryShapeAt(pAry, i);
 		return a;
+	}
+}
+
+/* ************************************************************************ */
+/* Catalog
+ *
+ * The das federated catalog is a tree of small JSON documents spread over
+ * several servers.  Container nodes (Catalog, Collection, SourceSet) list
+ * their children by name with the URLs each loads from, mirrors included.
+ * Source nodes (HttpStreamSrc) describe how to query a data server.
+ *
+ * das2C parses nodes, matches paths and falls back to the next mirror
+ * (DasNodeWalk, das3/node.h); the documents are fetched with fetch(), so
+ * the browser's HTTP cache and CORS rules apply.  Nodes stay in the wasm
+ * heap until DasCatalog.free().
+ */
+
+/* das_walk_state_e from das3/node.h.  Hard coded: an enum has no value to
+ * read at load time the way the shape sentinels do. */
+const WALK_FETCH = 0;
+const WALK_DONE = 1;
+
+/* das2C's DASSRC_BLANK_REQ, a requisition with nothing filled in */
+const BLANK_REQ = -1;
+
+/* Where browsing starts when no seed is given: the federated site catalog,
+ * reached from the compiled in root index */
+const SITE_URI = 'tag:das2.org,2012:site';
+
+/* A NUL terminated string the C side lends us, or null for a NULL pointer.
+ * Not freed: the C object it belongs to still owns it. */
+function cString(m, p)
+{
+	if(p === 0) return null;
+	const end = m.HEAPU8.indexOf(0, p);
+	return UTF8.decode(m.HEAPU8.subarray(p, end));
+}
+
+/** A catalog session.
+ *
+ * Holds the root of a node tree in the wasm heap and loads nodes below it
+ * on demand.  Get one from DasRuntime.newCatalog().
+ *
+ *   const cat = das.newCatalog();
+ *   const site = await cat.open();          // tag:das2.org,2012:site
+ *   const v1 = await site.child('uiowa/voyager/1');
+ *   for(const kid of v1.children) console.log(kid.name, kid.kind, kid.title);
+ *   cat.free();
+ *
+ * Options:
+ *
+ *   seed     URL of a node to use as the root instead of das2C's compiled
+ *            in root index.  Without seedUri it is an unnamed root: nodes
+ *            below it are named by their path from it.
+ *   seedUri  The catalog URI the seed node stands for, so the nodes below
+ *            it carry their real federated names.
+ *   start    Path from the root to the node open() returns.  Default
+ *            'tag:das2.org,2012:site' without a seed, the seed itself with
+ *            one.
+ *   fetch    A fetch() work-alike, for tests that serve fixtures from
+ *            another place, or apps that add headers.  Default: fetch.
+ *   timeout  Milliseconds to wait for each catalog document, default
+ *            10000.
+ */
+export class DasCatalog {
+	#d;                     /* the DasRuntime handle */
+	#root = 0;              /* DasNode*, the tree top this session owns */
+	#loading = null;        /* Promise of the root while it loads */
+	#nodes = new Map();     /* DasNode* -> DasCatNode, one view per node */
+	#pending = new Map();   /* walks in flight, see walk() */
+	#fetch;
+	#timeout;
+	#seed;
+	#seedUri;
+	#start;
+
+	constructor(das3, opts = {})
+	{
+		this.#d = das3;
+
+		/* The default is wrapped in an arrow function rather than stored as
+		 * a bare reference.  The browser's fetch checks that it was called
+		 * on the window and throws "Illegal invocation" when called as a
+		 * method of some other object, which this.#fetch(...) would be. */
+		this.#fetch = opts.fetch || ((url, init) => fetch(url, init));
+		this.#timeout = opts.timeout ?? 10000;
+		this.#seed = opts.seed || null;
+		this.#seedUri = opts.seedUri || null;
+		this.#start = opts.start ?? (this.#seed ? '' : SITE_URI);
+	}
+
+	/** The node browsing starts at, see the start option */
+	async open(){ return this.resolve(this.#start); }
+
+	/** Resolve a path from the root.  For the compiled in root that is a
+	 * full catalog URI, 'tag:das2.org,2012:site:/uiowa/juno'; for a seed it
+	 * is a path below the seed.
+	 * @returns {Promise<DasCatNode>}
+	 * @throws {DasError} naming the deepest node reached and what it lacked */
+	async resolve(path)
+	{
+		const root = await this.root();
+		return root.child(path);
+	}
+
+	/** The root node, loading it on first use */
+	async root()
+	{
+		/* Concurrent first calls share one load rather than racing to set
+		 * #root, which would leak the loser's tree */
+		if(this.#root === 0){
+			if(this.#loading === null)
+				this.#loading = this.#loadRoot().finally(() => { this.#loading = null; });
+			await this.#loading;
+		}
+		return this._node(this.#root);
+	}
+
+	/** Free every node this session loaded.  DasCatNode objects from it
+	 * are unusable afterwards; DasCatSource objects are independent and
+	 * stay valid. */
+	free()
+	{
+		if(this.#root === 0) return;
+		this.#d._c().nodeDel(this.#root);
+		this.#root = 0;
+		this.#nodes.clear();
+	}
+
+	/* The one view object per node, so a tree view can compare nodes with
+	 * === and keep state on them */
+	_node(p)
+	{
+		let node = this.#nodes.get(p);
+		if(node === undefined){
+			node = new DasCatNode(this, this.#d, p, takeJson(this.#d, this.#d._c().nodeJson(p)));
+			this.#nodes.set(p, node);
+		}
+		return node;
+	}
+
+	/* Walk from a loaded node, for DasCatNode.child().
+	 *
+	 * Two walks in flight to the same not-yet-loaded child would each load
+	 * it and each attach it under the parent when done, since das2C checks
+	 * for an existing child when a walk starts but not when it finishes.
+	 * So identical walks share one promise.  Overlapping different paths
+	 * ('a' and 'a/b' at once) are not caught here. */
+	walk(pFrom, path)
+	{
+		const key = pFrom + '\n' + path;
+		let pr = this.#pending.get(key);
+		if(pr === undefined){
+			pr = this.#walk(pFrom, path).finally(() => this.#pending.delete(key));
+			this.#pending.set(key, pr);
+		}
+		return pr;
+	}
+
+	async #walk(pFrom, path)
+	{
+		const c = this.#d._c();
+		/* new_DasNodeWalk logs its refusal rather than recording it, so
+		 * lastError() would hold some earlier, unrelated failure */
+		const w = c.walkNew(pFrom, path);
+		if(w === 0){
+			const n = this._node(pFrom);
+			throw new DasError(`can't walk to '${path}' from ${n.uri ?? n.url}: it is a `
+				+ `${n.type} node, not a container` + (n.isSource ? '; see DasRuntime.loadSource()' : ''));
+		}
+		try{
+			const tried = await this.#drive(w);
+			const p = c.walkResult(w);
+			if(p !== 0) return this._node(p);
+			throw new DasError(this.#missMessage(w, path, tried));
+		}
+		finally{ c.walkDel(w); }
+	}
+
+	async #loadRoot()
+	{
+		const c = this.#d._c();
+		if(this.#seed !== null){
+			let doc;
+			try{ doc = await this.#get(this.#seed); }
+			catch(e){ throw new DasError(`${this.#seed}: ${e.message}`); }
+			const p = this.#withHeap(doc.bytes,
+				(pBytes, n) => c.nodeNew(pBytes, n, doc.url, this.#seedUri));
+			if(p === 0)
+				throw new DasError(`${this.#seed} is not a catalog node: ${this.#d.lastError()}`);
+			this.#root = p;
+			return;
+		}
+
+		/* The compiled in root index, from whichever of its mirrors answers */
+		const w = c.walkSeed();
+		try{
+			const tried = await this.#drive(w, true);
+			const p = c.walkResult(w);
+			if(p === 0)
+				throw new DasError(`no copy of the das catalog index answered: ${tried.join('; ')}`);
+			this.#root = p;   /* a seed is the caller's to free, see node.h */
+		}
+		finally{ c.walkDel(w); }
+	}
+
+	/* The driver loop from das3/node.h with fetch() as the transport.
+	 * Index 0 is always the candidate to try next: das2C drops the ones that
+	 * fail.  Returns what went wrong along the way, for error messages.
+	 *
+	 * Each await hands control back to the page, which may free the catalog
+	 * meanwhile.  Feeding a walk whose start node is gone would write into
+	 * freed memory, so the root is re-checked after every fetch.  A seed
+	 * walk starts from nothing and is exempt. */
+	async #drive(w, bSeed = false)
+	{
+		const c = this.#d._c();
+		const tried = [];
+		while(c.walkState(w) === WALK_FETCH){
+			const url = c.walkUrl(w, 0);
+			let doc = null, why = '';
+			try{ doc = await this.#get(url); }
+			catch(e){ why = e.message; }
+
+			if(!bSeed && this.#root === 0)
+				throw new DasError('catalog freed during a walk');
+
+			if(doc === null){
+				tried.push(`${url}: ${why}`);
+				c.walkFail(w, 0, why);
+				continue;
+			}
+			const rc = this.#withHeap(doc.bytes,
+				(pBytes, n) => c.walkFeed(w, 0, pBytes, n, doc.url));
+			if(rc !== 0) tried.push(`${url}: not a catalog node`);
+		}
+		return tried;
+	}
+
+	/* One catalog document.  Rejects with a short reason as the message. */
+	async #get(url)
+	{
+		/* fetch() never gives up on a server that accepts the connection
+		 * and then says nothing.  The timeout covers the body read too. */
+		const signal = AbortSignal.timeout(this.#timeout);
+		let resp;
+		try{ resp = await this.#fetch(url, {signal}); }
+		catch(e){
+			if(e.name === 'TimeoutError') throw new Error(`no answer in ${this.#timeout / 1000} s`);
+			throw new Error(e.message || String(e));
+		}
+		if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+		const bytes = new Uint8Array(await resp.arrayBuffer());
+
+		/* The final URL only when the server really redirected; a custom
+		 * fetch that maps URLs to fixtures should not rename the node */
+		return {bytes, url: resp.redirected ? resp.url : url};
+	}
+
+	/* Copy bytes into a temporary heap buffer for the length of one call.
+	 * malloc(0) may return NULL, hence the minimum of one byte. */
+	#withHeap(bytes, fn)
+	{
+		const m = this.#d._m();
+		const p = m._malloc(bytes.length || 1);
+		try{
+			m.HEAPU8.set(bytes, p);
+			return fn(p, bytes.length);
+		}
+		finally{ m._free(p); }
+	}
+
+	/* "no 'juno/wav' under tag:...:/uiowa" plus the failures on the way.
+	 * DasNodeWalk_nearest reports through an out pointer, so a 4 byte slot
+	 * on the heap receives it. */
+	#missMessage(w, path, tried)
+	{
+		const m = this.#d._m();
+		const pRest = m._malloc(4);
+		let sNear, sRest;
+		try{
+			m.HEAP32[pRest >> 2] = 0;
+			sNear = cString(m, this.#d._c().walkNearest(w, pRest));
+			sRest = cString(m, m.HEAP32[pRest >> 2]);
+		}
+		finally{ m._free(pRest); }
+
+		let msg = (sNear === null)
+			? `couldn't resolve '${path}'`
+			: `no '${sRest ?? path}' under ${sNear || 'the root'}`;
+		if(tried.length > 0) msg += ` (${tried.join('; ')})`;
+		return msg;
+	}
+}
+
+/** One node of a catalog, a view over a snapshot taken when it loaded.
+ *
+ * Fields follow the node document: kind, type, version, name, label,
+ * title, description, plus the uri it has in the catalog (null for a
+ * root), the url it loaded from and, for containers, the separator its
+ * children's names are joined with.
+ *
+ * kind is das2C's normalized type: 'catalog', 'collection', 'srcset',
+ * 'stream_src', 'file_agg', 'spdf_cat', 'spase_cat', or 'inv' for a type
+ * this das2C does not know (type still has the document's spelling).
+ */
+export class DasCatNode {
+	#cat;
+	#d;
+	#p;
+	#s;
+	#kids = null;
+
+	constructor(cat, das3, p, snap)
+	{
+		this.#cat = cat;
+		this.#d = das3;
+		this.#p = p;
+		this.#s = snap;
+	}
+
+	get kind(){ return this.#s.kind; }
+	get type(){ return this.#s.type; }
+	get version(){ return this.#s.version; }
+	get name(){ return this.#s.name; }
+	get label(){ return this.#s.label; }
+	get title(){ return this.#s.title; }
+	get description(){ return this.#s.description; }
+	get uri(){ return this.#s.uri; }
+	get url(){ return this.#s.url; }
+	get separator(){ return this.#s.separator; }
+
+	/** True for nodes that list children, whether or not any are listed */
+	get isContainer(){ return this.#s.separator !== null; }
+
+	/** True for nodes source() can build a data source from */
+	get isSource(){ return this.#s.kind === 'stream_src'; }
+
+	/** The listed children, known without loading any of them.
+	 *
+	 * Each is {name, kind, label, title, description, provides, urls,
+	 * loadable, stub}.  name is the path component for child(); label is
+	 * what to show, falling back to the name.  loadable says das2C could
+	 * build a data source from that child.  stub is the container's entry
+	 * as the server wrote it, for fields not lifted out here.
+	 */
+	get children()
+	{
+		if(this.#kids === null){
+			const loadable = new Set(this.#s.loadable);
+			this.#kids = this.#s.children.map(k => {
+				const st = k.stub || {};
+				return {
+					name: k.name,
+					kind: k.kind,
+					label: st.label || st.name || k.name,
+					title: st.title || null,
+					description: st.description || null,
+					provides: st.provides || [],
+					urls: st.urls || [],
+					loadable: loadable.has(k.name),
+					stub: st,
+				};
+			});
+		}
+		return this.#kids;
+	}
+
+	/** Load a descendant: one child name, or a path of them joined by the
+	 * separators the catalog uses.  A child already loaded costs nothing.
+	 * @returns {Promise<DasCatNode>}
+	 * @throws {DasError} naming the deepest node reached and what it lacked */
+	child(path){ return this.#cat.walk(this.#p, path); }
+
+	/** A data source built from this node, see DasCatSource.  Only for
+	 * nodes where isSource is true. */
+	source(){ return new DasCatSource(this.#d, this.#p); }
+}
+
+/** A data source: what a source node offers and the request URLs for it.
+ *
+ * Built from a copy of the node document, so it outlives the catalog it
+ * came from.  Holds C memory: call free() when done.
+ */
+export class DasCatSource {
+	#d;
+	#p;
+
+	constructor(das3, pNode)
+	{
+		this.#d = das3;
+		this.#p = das3._c().srcNew(pNode);
+		/* new_DasSrc_node logs why, it doesn't record it for lastError() */
+		if(this.#p === 0)
+			throw new DasError('not a data source node, see the log for why');
+	}
+
+	get title(){ return cString(this.#d._m(), this.#d._c().srcTitle(this.#p)); }
+
+	/** True if the catalog marks the source as protected.  Servers may
+	 * still answer some requests without a login, by time range for
+	 * instance; a 401 (DasError.status) is the real answer. */
+	get needsAuth(){ return this.#d._c().srcNeedsAuth(this.#p); }
+
+	/** The login realm the catalog names, or '' */
+	get authRealm(){ return cString(this.#d._m(), this.#d._c().srcAuthRealm(this.#p)); }
+
+	/** Labels of the worked examples the node provides, possibly none */
+	get examples()
+	{
+		const c = this.#d._c();
+		const n = c.srcExCount(this.#p);
+		const a = new Array(n);
+		for(let i = 0; i < n; ++i) a[i] = c.srcExLabel(this.#p, i);
+		return a;
+	}
+
+	/** Build a request.
+	 *
+	 * @param {number} [example] Which worked example to start from.  -1
+	 *        starts blank.  Default: the first example if there is one.
+	 * @param {object} [settings] Keys to change, {'time.min': '2025-10-01'},
+	 *        in the spellings das_fetch accepts (das3/source.h, "Keys").
+	 * @returns {{url: string, mime: string}} mime is '' when the source
+	 *        does not say what it will send
+	 * @throws {DasError} for an unknown key, or settings that don't add up
+	 *        to a request; das2C logs the details to the console
+	 */
+	request(example, settings = {})
+	{
+		const c = this.#d._c();
+		const m = this.#d._m();
+		if(example === undefined) example = (c.srcExCount(this.#p) > 0) ? 0 : BLANK_REQ;
+
+		const req = c.srcNewReq(this.#p, example);
+		if(req === 0) throw new DasError(`no example ${example}: ${this.#d.lastError()}`);
+		let buf = 0;
+		try{
+			for(const [key, val] of Object.entries(settings))
+				if(c.reqSet(req, key, String(val)) !== 0)
+					throw new DasError(`can't set ${key}: ${this.#d.lastError()}`);
+
+			/* snprintf style: the return is the length needed, so one retry
+			 * with the exact size covers any URL */
+			let size = 4096;
+			buf = m._malloc(size);
+			let n = c.srcUrl(this.#p, req, 0, buf, size);
+			if(n >= size){
+				m._free(buf);
+				size = n + 1;
+				buf = m._malloc(size);
+				n = c.srcUrl(this.#p, req, 0, buf, size);
+			}
+			if(n === 0)
+				throw new DasError('no request URL for these settings, see the console log');
+			return {url: cString(m, buf), mime: c.srcMime(this.#p, req)};
+		}
+		finally{
+			if(buf) m._free(buf);
+			c.reqDel(req);
+		}
+	}
+
+	/** Release the C side.  The object is unusable afterwards. */
+	free()
+	{
+		if(this.#p === 0) return;
+		this.#d._c().srcDel(this.#p);
+		this.#p = 0;
 	}
 }

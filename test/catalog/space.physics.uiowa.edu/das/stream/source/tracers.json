@@ -1,0 +1,24 @@
+{
+  "version": "0.5",
+  "type": "Catalog",
+  "label": "Tracers",
+  "title": "Tandem Reconnection and Cusp Electrodynamics Reconnaissance Satellites - Earth Polar Orbiters",
+  "catalog": {
+    "tracers-2": {
+      "urls": [
+        "https://space.physics.uiowa.edu/das/stream/source/tracers/tracers-2.json"
+      ],
+      "label": "TRACERS-2",
+      "title": "Orbit leader",
+      "type": "Catalog"
+    },
+    "tracers-1": {
+      "urls": [
+        "https://space.physics.uiowa.edu/das/stream/source/tracers/tracers-1.json"
+      ],
+      "label": "TRACERS-1",
+      "title": "Orbit follower",
+      "type": "Catalog"
+    }
+  }
+}

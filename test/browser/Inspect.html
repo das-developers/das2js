@@ -8,13 +8,15 @@
 <style>
 	input[type=text] { width: min(40em, 100%); }
 	#status { margin: 0.5em 0; }
+	#login { margin: 0.5em 0 1em; }
+	#login p { margin: 0 0 0.4em; }
 	#out { max-height: 75vh; }
 </style>
 </head>
 <body>
 <nav class="bar"><div><a href="index.html">&larr; das2js test pages</a></div></nav>
 <main>
-<h1>Structure inspector</h1>
+<h1>Stream inspector</h1>
 <p>Point at a das stream and see its structure: every dataset, dimension and
 variable with its properties, but no data values.</p>
 <form id="form">
@@ -22,6 +24,12 @@ variable with its properties, but no data values.</p>
 	<button type="submit">Load</button>
 </form>
 <p id="status"></p>
+<form id="login" hidden>
+	<p id="loginMsg"></p>
+	<input type="text" id="user" autocomplete="username" placeholder="user">
+	<input type="password" id="pass" autocomplete="current-password" placeholder="password">
+	<button type="submit">Log in</button>
+</form>
 <pre id="out"></pre>
 </main>
 <script type="module" src="./Inspect.mjs"></script>

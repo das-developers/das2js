@@ -4,13 +4,20 @@
  * The whole page is JSON.stringify(stream, null, 2); every handle class in
  * das2js.mjs has a toJSON() that returns its structure as plain data, so
  * nothing here knows the dataset model.  The URL comes from the form or
- * from ?url=... so a stream can be bookmarked. */
+ * from ?url=... so a stream can be bookmarked.
+ *
+ * A 401 brings up a login form, and the fetch is retried with an
+ * Authorization header; see "Logins" below. */
 
-import {load, DasError} from '../build/das2js.mjs';
+import {load, DasError, basicAuth} from '../build/das2js.mjs';
 
 const out = document.getElementById('out');
 const status = document.getElementById('status');
 const urlBox = document.getElementById('url');
+const loginForm = document.getElementById('login');
+const loginMsg = document.getElementById('loginMsg');
+const userBox = document.getElementById('user');
+const passBox = document.getElementById('pass');
 
 const DEFAULT_URL = '../das2C/examples/ex17_vector_noframe.d3b';
 
@@ -35,11 +42,54 @@ function report(line, pass)
 
 const d = await load({progName: 'inspect'});
 
+/* ************************************************************************ */
+/* Logins, by origin, in page memory only: never in the URL or in browser
+ * storage.  Sent only after a server answers 401, since servers decide per
+ * request. */
+
+const logins = new Map();
+let current = null;   /* the URL shown, for the retry after a login */
+
+/* Passwords go to https only, or to loopback for the test runner's /auth/ */
+const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+function askLogin(url, e, refused)
+{
+	const where = new URL(url, location.href);
+	loginMsg.textContent = refused
+		? `${where.host} refused that login.`
+		: `${where.host} wants a login${e.realm ? ` for "${e.realm}"` : ''}.`;
+	loginForm.hidden = false;
+	userBox.focus();
+}
+
+loginForm.addEventListener('submit', ev => {
+	ev.preventDefault();
+	const where = new URL(current, location.href);
+	if(where.protocol !== 'https:' && !LOOPBACK.has(where.hostname)){
+		loginMsg.textContent = `Not sending a password to ${where.host} over plain http.`;
+		return;
+	}
+	try{ logins.set(where.origin, basicAuth(userBox.value, passBox.value)); }
+	catch(e){
+		loginMsg.textContent = e.message;
+		return;
+	}
+	passBox.value = '';
+	inspect(current);
+});
+
+/* ************************************************************************ */
+
 async function inspect(url, verdict = false)
 {
+	current = url;
+	loginForm.hidden = true;
 	out.textContent = '';
 	out.className = '';
 	status.textContent = 'fetching...';
+	const origin = new URL(url, location.href).origin;
+	const auth = logins.get(origin);
 	const t0 = performance.now();
 	let bytes = 0;
 	try{
@@ -47,6 +97,7 @@ async function inspect(url, verdict = false)
 		 * already walkable there, which is how a progress meter works.  Here
 		 * it just keeps the byte count moving. */
 		const strm = await d.fetchStream(url, {
+			headers: auth ? {Authorization: auth} : undefined,
 			onChunk: (rdr, n) => { bytes = n; status.textContent = `${n} bytes...`; }
 		});
 		const ms = (performance.now() - t0).toFixed(0);
@@ -63,6 +114,10 @@ async function inspect(url, verdict = false)
 			? `${e.message}${e.exception ? '\n\nserver said: ' + e.exception : ''}`
 			: `${e.name}: ${e.message}`;
 		if(verdict) report(`ERROR: inspector failed on ${url}: ${e.message}`, false);
+		if(e instanceof DasError && e.status === 401){
+			if(auth) logins.delete(origin);   /* that one didn't work */
+			askLogin(url, e, Boolean(auth));
+		}
 	}
 }
 
