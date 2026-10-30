@@ -1,0 +1,261 @@
+{
+   "format": {
+      "default": {
+         "mime": "application/vnd.das2.das2stream",
+         "name": "Das2 Stream"
+      }
+   },
+   "interface": {
+      "coordinates": {
+         "frequency": {
+            "name": "Frequency",
+            "title": "Channel Center Frequencies",
+            "units": {
+               "value": "Hz"
+            }
+         },
+         "time": {
+            "maximum": {
+               "set": {
+                  "param": "end_time",
+                  "range": [
+                     "1977-09-05",
+                     "now"
+                  ],
+                  "required": true
+               },
+               "value": "2014-09-01"
+            },
+            "minimum": {
+               "set": {
+                  "param": "start_time",
+                  "range": [
+                     "1977-09-05",
+                     "now"
+                  ],
+                  "required": true
+               },
+               "value": "2014-08-31"
+            },
+            "name": "Time",
+            "resolution": {
+               "set": {
+                  "param": "resolution",
+                  "required": false
+               },
+               "units": "s",
+               "value": 43.2
+            },
+            "units": {
+               "value": "UTC"
+            }
+         }
+      },
+      "data": {
+         "efield": {
+            "name": "E Field",
+            "title": "Electric field intensity",
+            "units": {
+               "set": {
+                  "enum": [
+                     {
+                        "flag": "04",
+                        "value": "raw"
+                     },
+                     {
+                        "flag": "05",
+                        "value": "V**2 m**-2 Hz**-1"
+                     },
+                     {
+                        "flag": "06",
+                        "value": "W m**-2 Hz**-1"
+                     }
+                  ],
+                  "param": "params"
+               },
+               "value": "V m**-1"
+            }
+         }
+      },
+      "options": {
+         "das2_text": {
+            "name": "das2 text",
+            "set": {
+               "param": "ascii",
+               "pval": "true",
+               "value": true
+            },
+            "title": "Convert stream to das2 text (utf-8) format",
+            "value": false
+         },
+         "negative": {
+            "name": "Keep Negative",
+            "set": {
+               "flag": "00",
+               "param": "params",
+               "value": true
+            },
+            "title": "Negative values are used as a noise flagand are normally excluded.  Use this option to keep them.",
+            "type": "boolean",
+            "value": false
+         },
+         "noise": {
+            "name": "Keep Noise",
+            "set": {
+               "flag": "02",
+               "param": "params",
+               "value": true
+            },
+            "title": "Turn off 17-time-point noise burst filter",
+            "type": "boolean",
+            "value": false
+         },
+         "pls": {
+            "name": "Keep PLS Interference",
+            "set": {
+               "flag": "01",
+               "param": "params",
+               "value": true
+            },
+            "title": "Turn off PLS noise filter for the 311 Hz and 562 Hz bands.",
+            "type": "boolean",
+            "value": false
+         },
+         "threshold": {
+            "set": {
+               "flag": "03",
+               "param": "params",
+               "value": true
+            },
+            "title": "Filter out values above the data number thresholds given in HOUR[1/2]/FILTER.CSV",
+            "type": "boolean",
+            "value": false
+         }
+      }
+   },
+   "name": "Das2/2.2 Source",
+   "protocol": {
+      "authentication": {
+         "required": false
+      },
+      "base_urls": [
+         "https://planet.physics.uiowa.edu/das/das2Server?server=dataset&dataset=Voyager/1/PWS/SpecAnalyzer-4s-Efield"
+      ],
+      "convention": "das2/2.2",
+      "examples": {
+         "example_00": {
+            "http_params": {
+               "end_time": "2014-09-01",
+               "resolution": 43.2,
+               "start_time": "2014-08-31"
+            },
+            "name": "Example 00",
+            "title": "Latest Data",
+            "url": "https://planet.physics.uiowa.edu/das/das2Server?server=dataset&dataset=Voyager/1/PWS/SpecAnalyzer-4s-Efield&resolution=43.2&end_time=2014-09-01&start_time=2014-08-31"
+         },
+         "example_01": {
+            "http_params": {
+               "end_time": "1979-04-14",
+               "resolution": 1900.8,
+               "start_time": "1979-03-01"
+            },
+            "name": "Example 01",
+            "title": "Jupiter Encounter",
+            "url": "https://planet.physics.uiowa.edu/das/das2Server?server=dataset&dataset=Voyager/1/PWS/SpecAnalyzer-4s-Efield&resolution=1900.8&end_time=1979-04-14&start_time=1979-03-01"
+         },
+         "example_02": {
+            "http_params": {
+               "end_time": "1980-11-14",
+               "resolution": 172.8,
+               "start_time": "1980-11-10"
+            },
+            "name": "Example 02",
+            "title": "Saturn Encounter",
+            "url": "https://planet.physics.uiowa.edu/das/das2Server?server=dataset&dataset=Voyager/1/PWS/SpecAnalyzer-4s-Efield&resolution=172.8&end_time=1980-11-14&start_time=1980-11-10"
+         }
+      },
+      "http_params": {
+         "ascii": {
+            "name": "UTF-8",
+            "required": false,
+            "title": "Insure stream output is readable as UTF-8 text",
+            "type": "boolean"
+         },
+         "end_time": {
+            "name": "Max Time",
+            "required": true,
+            "title": "Maximum Time Value to stream",
+            "type": "isotime"
+         },
+         "params": {
+            "flag_sep": " ",
+            "flags": {
+               "00": {
+                  "name": "--negative=off",
+                  "title": "Negative values are used as a noise flagand are normally excluded.  Use this option to keep them.",
+                  "value": "--negative=off"
+               },
+               "01": {
+                  "name": "--pls=off",
+                  "title": "Turn off PLS noise filter for the 311 Hz and 562 Hz bands.",
+                  "value": "--pls=off"
+               },
+               "02": {
+                  "name": "--noise=off",
+                  "title": "Turn off 17-time-point noise burst filter",
+                  "value": "--noise=off"
+               },
+               "03": {
+                  "name": "--threshold=on",
+                  "title": "Filter out values above the data number thresholds given in HOUR[1/2]/FILTER.CSV",
+                  "value": "--threshold=on"
+               },
+               "04": {
+                  "name": "--units=DN",
+                  "title": "Output raw instrument values, do not calibrate",
+                  "value": "--units=DN"
+               },
+               "05": {
+                  "name": "--units=SD",
+                  "title": "Output electric spectral density in V**2 m**-2 Hz**-1",
+                  "value": "--units=SD"
+               },
+               "06": {
+                  "name": "--units=PF",
+                  "title": "Output electric power spectral density in W m**-2 Hz**-1",
+                  "value": "--units=PF"
+               }
+            },
+            "required": false,
+            "title": "Optional reader arguments",
+            "type": "flag_set"
+         },
+         "resolution": {
+            "description": "The server will return data at or better than the given resolution if possible.  Leave un-specified to get data at intrinsic resolution without server side averages",
+            "name": "Resolution",
+            "required": false,
+            "title": "Maximum resolution between output time points",
+            "type": "real",
+            "units": "s"
+         },
+         "start_time": {
+            "name": "Min Time",
+            "required": true,
+            "title": "Minimum time value to stream",
+            "type": "isotime"
+         }
+      }
+   },
+   "tech_contacts": [
+      {
+         "email": "chris-piker@uiowa.edu",
+         "name": "Chris Piker"
+      }
+   ],
+   "title": "Electric Field averages and peaks from the Voyager 1 PWS Spectrum Analyzer",
+   "type": "HttpStreamSrc",
+   "uris": [
+      "tag:physics.uiowa.edu,2018:das.voyager.1.pws.specanalyzer-4s-efield.das2"
+   ],
+   "version": "0.6"
+}

@@ -1,0 +1,24 @@
+{
+  "version": "0.5",
+  "type": "Catalog",
+  "label": "SPICE",
+  "title": "TRACERS 1: SPICE Model Information",
+  "catalog": {
+    "geomagcoords": {
+      "urls": [
+        "https://space.physics.uiowa.edu/das/stream/source/tracers/tracers-1/spice/geomagcoords.json"
+      ],
+      "label": "GeomagCoords",
+      "title": "TRACERS 2 Geomagnetic Location Coordinates, Predicted",
+      "type": "SourceSet"
+    },
+    "igrf": {
+      "urls": [
+        "https://space.physics.uiowa.edu/das/stream/source/tracers/tracers-1/spice/igrf.json"
+      ],
+      "label": "IGRF",
+      "title": "TRACERS 2 Geomagnetic Location Coordinates",
+      "type": "SourceSet"
+    }
+  }
+}

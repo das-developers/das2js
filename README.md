@@ -18,7 +18,8 @@ no minified build, no catalog browser, no plotting; a progress meter, a source
 picker, a catalog tree view and a live spectrogram are the planned demos. 
 Layout:
 
-  * `src/` - the hand-written ES module, one file
+  * `src/` - the ES modules: `das2js.mjs`, the core, and
+    `das-catalog-tree.mjs`, a `<das-catalog-tree>` element
   * `glue/` - a small flat C interface over das2C, the wasm export surface
   * `test/` - the glue test (wasm under node) and the browser tests
     (headless Firefox via a node runner)

@@ -1,0 +1,112 @@
+{
+   "catalog": {
+      "cassini": {
+         "name": "Cassini",
+         "title": "Saturn System Explorer - Orbit Insertion 2004-06-30",
+         "type": "Catalog",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/cassini.json"
+         ]
+      },
+      "de": {
+         "name": "DE",
+         "title": "Earth polar orbiters - Launch date 1981-08-03",
+         "type": "Catalog",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/de.json"
+         ]
+      },
+      "earth": {
+         "name": "Earth",
+         "title": "Earth based observatories",
+         "type": "Catalog",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/earth.json"
+         ]
+      },
+      "galileo": {
+         "name": "Galileo",
+         "title": "Jupiter equatorial orbiter - Launch date 1989-10-13",
+         "type": "Catalog",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/galileo.json"
+         ]
+      },
+      "isee": {
+         "name": "ISEE",
+         "title": "International Sun-Earth Explorers - Launch date 1977-10-22",
+         "type": "Catalog",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/isee.json"
+         ]
+      },
+      "juno": {
+         "name": "Juno",
+         "title": "Jupiter polar orbiter - Launch date 2011-08-05",
+         "type": "Catalog",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/juno.json"
+         ]
+      },
+      "mars_express": {
+         "name": "Mars Express",
+         "title": "Mars polar orbiter - Launch date 2003-06-02",
+         "type": "Catalog",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/mars_express.json"
+         ]
+      },
+      "maven": {
+         "name": "Maven",
+         "title": "Mars Atmosphere and Volatile Evolution Mission - Orbit Insertion 2014-09-22",
+         "type": "Catalog",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/maven.json"
+         ]
+      },
+      "stereo": {
+         "name": "Stereo",
+         "title": "Dual Solar Terrestrial Relation Observatories - Launch date 2006-10-26",
+         "type": "Catalog",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/stereo.json"
+         ]
+      },
+      "tracers": {
+         "name": "Tracers",
+         "title" : "Tandem Reconnection and Cusp Electrodynamics Reconnaissance Satellites - Launch date 2025-07-23",
+         "type": "Catalog",
+         "urls": [
+            "https://space.physics.uiowa.edu/das/stream/source/tracers.json"
+         ]      
+      },
+      "van_allen_probes": {
+         "name": "Van Allen Probes",
+         "title": "Twin probes of the Earth's inner and outer radiation belts, launched on 2012-08-30",
+         "type": "Catalog",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/van_allen_probes.json"
+         ]
+      },
+      "voyager": {
+         "name": "Voyager",
+         "title": "Dual Spacecraft Mission to the Outer Planets, and Beyond",
+         "type": "Catalog",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/voyager.json"
+         ]
+      },
+      "wind": {
+         "name": "Wind",
+         "title": "WIND Solar-Terrestrial Mission  - Launch date 1994-11-01",
+         "type": "Catalog",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/wind.json"
+         ]
+      }
+   },
+   "name": "U. Iowa",
+   "title": "University of Iowa, Department of Physics and Astronomy",
+   "type": "Catalog",
+   "version": "0.5"
+}

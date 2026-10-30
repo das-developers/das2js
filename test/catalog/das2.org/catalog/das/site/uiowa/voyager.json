@@ -1,0 +1,24 @@
+{
+   "catalog": {
+      "1": {
+         "name": "1",
+         "title": "Launch date 1977-09-05, Datasets include Jupiter and Saturn flybys, and Heliopause crossing",
+         "type": "Catalog",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/voyager/1.json"
+         ]
+      },
+      "2": {
+         "name": "2",
+         "title": "Launch date 1977-08-20, Datasets includes Jupiter, Saturn, Uranus, & Neptune Flyby's",
+         "type": "Catalog",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/voyager/2.json"
+         ]
+      }
+   },
+   "name": "Voyager",
+   "title": "Dual Spacecraft Mission to the Outer Planets, and Beyond",
+   "type": "Catalog",
+   "version": "0.5"
+}

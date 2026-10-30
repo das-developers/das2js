@@ -1,0 +1,24 @@
+{
+  "version": "0.5",
+  "type": "Catalog",
+  "label": "TRACERS-1",
+  "title": "Orbit follower",
+  "catalog": {
+    "spice": {
+      "urls": [
+        "https://space.physics.uiowa.edu/das/stream/source/tracers/tracers-1/spice.json"
+      ],
+      "label": "SPICE",
+      "title": "TRACERS 1: SPICE Model Information",
+      "type": "Catalog"
+    },
+    "l2": {
+      "urls": [
+        "https://space.physics.uiowa.edu/das/stream/source/tracers/tracers-1/l2.json"
+      ],
+      "label": "L2",
+      "title": "TRACERS-1 Level 2: Public science datasets",
+      "type": "Catalog"
+    }
+  }
+}

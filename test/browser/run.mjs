@@ -44,7 +44,39 @@ const MOUNTS = [
 	['/build/', path.join(ROOT, 'build.wasm32')],
 	['/test/',  HERE],
 	['/das2C/', path.join(ROOT, 'deps', 'das2C')],
+	['/catalog/', path.join(ROOT, 'test', 'catalog')],
 ];
+
+/* /auth/ serves the das2C mount behind a Basic auth login.  Pages must
+ * reach it under the other loopback name (localhost for 127.0.0.1 and
+ * back): as a second origin it gets the CORS preflight a remote das server
+ * gets, and same origin would bring up Firefox's own login dialog.  The
+ * password's non-ASCII letters test basicAuth()'s encoding. */
+const AUTH_REALM = 'das2js test';
+const AUTH_HDR = 'Basic ' + Buffer.from('tester:p\u00e4ss\u03c0', 'utf8').toString('base64');
+const CORS = {
+	'Access-Control-Allow-Origin': '*',
+	'Access-Control-Expose-Headers': 'WWW-Authenticate',
+};
+
+/* Answer the /auth/ preflight or refuse a bad login, returning null; or
+ * return the das2C path to serve when the login matches */
+function authGate(req, res, url)
+{
+	if(req.method === 'OPTIONS'){
+		res.writeHead(204, {...CORS,
+			'Access-Control-Allow-Methods': 'GET, OPTIONS',
+			'Access-Control-Allow-Headers': 'Authorization',
+		}).end();
+		return null;
+	}
+	if(req.headers.authorization !== AUTH_HDR){
+		res.writeHead(401, {...CORS, 'WWW-Authenticate': `Basic realm="${AUTH_REALM}"`})
+			.end('login required');
+		return null;
+	}
+	return '/das2C/' + url.pathname.slice('/auth/'.length);
+}
 
 /* The .wasm type matters: WebAssembly.instantiateStreaming refuses anything
  * else.  Module scripts need a JavaScript type too, and so do stylesheets
@@ -142,10 +174,18 @@ const server = http.createServer(async (req, res) => {
 		return;
 	}
 
+	let pathname = url.pathname;
+	let extra = {};
+	if(pathname.startsWith('/auth/')){
+		pathname = authGate(req, res, url);
+		if(pathname === null) return;
+		extra = CORS;
+	}
+
 	for(const [prefix, dir] of MOUNTS){
-		if(!url.pathname.startsWith(prefix)) continue;
+		if(!pathname.startsWith(prefix)) continue;
 		/* path.normalize then a prefix check keeps ../ from escaping the mount */
-		const rel = path.normalize(decodeURIComponent(url.pathname.slice(prefix.length)));
+		const rel = path.normalize(decodeURIComponent(pathname.slice(prefix.length)));
 		const file = path.join(dir, rel);
 		if(!file.startsWith(dir)) break;
 		let data;
@@ -154,11 +194,12 @@ const server = http.createServer(async (req, res) => {
 		res.writeHead(200, {
 			'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
 			'Cache-Control': 'no-store',
+			...extra,
 		});
 		res.end(data);
 		return;
 	}
-	res.writeHead(404).end('not found: ' + url.pathname);
+	res.writeHead(404, extra).end('not found: ' + url.pathname);
 });
 
 server.on('error', e => {

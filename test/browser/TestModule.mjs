@@ -9,7 +9,7 @@
  * result).  The runner is optional; served from anywhere else the page
  * skips the POSTs and still works. */
 
-import {load, DasError} from '../build/das2js.mjs';
+import {load, DasError, basicAuth} from '../build/das2js.mjs';
 
 const out = document.getElementById('out');
 let failed = false;
@@ -425,6 +425,193 @@ async function main()
 		catch(e){ threw = (e instanceof DasError); }
 		check(threw, '404 did not surface as DasError');
 	}
+	return d;
 }
 
-main().catch(e => check(false, `uncaught: ${e.message}\n${e.stack || ''}`)).then(done);
+/* Catalog walks against the internal test catalog in test/catalog/, a copy of
+ * real nodes laid out as host/path.  tracers-1.json is trimmed to the
+ * public levels, L2 and SPICE.  The custom fetch maps every https URL
+ * the walk asks for onto that tree, so das2C sees the real URLs and the
+ * runner serves the bytes.  Hosts not in the copy, and siblings left out of
+ * it, come back 404, which is how the failure paths are reached.
+ * 'hang.invalid' never answers, for the timeout. */
+function fixtureFetch(url, init)
+{
+	if(url.includes('//hang.invalid/'))
+		return new Promise((_, reject) =>
+			init.signal.addEventListener('abort', () => reject(init.signal.reason)));
+	return fetch(url.replace(/^https:\/\//, '/catalog/'), init);
+}
+
+async function expectThrow(pr, re, msg)
+{
+	try{ await pr; }
+	catch(e){
+		check(e instanceof DasError, `${msg}: threw ${e.name}, not DasError`);
+		check(re.test(e.message), `${msg}: message '${e.message}' lacks ${re}`);
+		return;
+	}
+	check(false, `${msg}: did not throw`);
+}
+
+const SITE = 'tag:das2.org,2012:site';
+const VGR = 'uiowa/voyager/1/pws/specanalyzer-4s-efield';   /* a Collection */
+const BAC = 'uiowa/tracers/tracers-1/l2/msc_bac';            /* a SourceSet */
+const VGR_DAS2 = 'https://planet.physics.uiowa.edu/das/das2Server?server=dataset'
+	+ '&dataset=Voyager/1/PWS/SpecAnalyzer-4s-Efield';
+
+async function catalogChecks(d)
+{
+	/* The compiled in root index, then down to the federated site catalog */
+	const cat = d.newCatalog({fetch: fixtureFetch});
+	const site = await cat.open();
+	check(site.uri === SITE, `site uri ${site.uri}`);
+	check(site.kind === 'catalog' && site.separator === ':/', `site kind ${site.kind}, sep ${site.separator}`);
+	check(site.children.map(k => k.name).join() === 'jhuapl,uiowa,voparis',
+		`site children ${site.children.map(k => k.name)}`);
+	check(site.isContainer && !site.isSource, 'site container flags');
+	const root = await cat.root();
+	check(root.uri === null, `compiled root uri ${root.uri}`);
+
+	/* A Collection holding one das2 source */
+	const coll = await site.child(VGR);
+	check(coll.uri === `${SITE}:/${VGR}`, `collection uri ${coll.uri}`);
+	check(coll.kind === 'collection', `collection kind ${coll.kind}`);
+	const lone = coll.children[0];
+	check(coll.children.length === 1 && lone.name === 'das2' && lone.kind === 'stream_src'
+		&& lone.loadable, `collection children ${coll.children.map(k => k.name)}`);
+
+	/* A SourceSet with one source das2C can load beside one it can't, and
+	 * that source's request URL in dasFlex's form */
+	{
+		const bac = await site.child(BAC);
+		check(bac.uri === `${SITE}:/${BAC}`, `bac uri ${bac.uri}`);
+		check(bac.kind === 'srcset', `bac kind ${bac.kind}`);
+		const kids = Object.fromEntries(bac.children.map(k => [k.name, k]));
+		check(kids.flex?.kind === 'stream_src' && kids.flex.loadable, 'flex listed as a loadable source');
+		check(kids.das2?.kind === 'inv' && kids.das2.stub.type === 'Das2DSDF', 'das2 child is an unknown type');
+		log(`INFO: catalog: ${bac.uri}: ${bac.children.map(k => `${k.name}(${k.kind})`).join(' ')}`);
+
+		const flex = await bac.child('flex');
+		check(flex.isSource && flex.version === '0.7', `flex source ${flex.kind} ${flex.version}`);
+		const fs = flex.source();
+		check(!fs.needsAuth, 'TRACERS L2 source asks for a login');
+		const freq = fs.request(undefined, {time: '2025-10-01T12'});
+		check(freq.url.startsWith('https://space.physics.uiowa.edu/das/stream/source/'
+			+ 'tracers/tracers-1/l2/msc_bac/flex?'), `request url ${freq.url}`);
+		check(freq.url.includes('read.time.min=2025-10-01T12%3A00%3A00'), `time not in ${freq.url}`);
+		log(`INFO: catalog: request ${freq.url} (${freq.mime || 'no mime'})`);
+		fs.free();
+	}
+
+	/* One view object per node, and identical walks in flight share a load */
+	const [das2, das2b] = await Promise.all([coll.child('das2'), coll.child('das2')]);
+	check(das2 === das2b, 'concurrent walks to one child gave two objects');
+	check(das2 === await site.child(`${VGR}/das2`), 'walk from the site gave another object');
+	check(das2.isSource && das2.version === '0.6', `das2 source ${das2.kind} ${das2.version}`);
+
+	/* The source: examples and request URLs */
+	const src = das2.source();
+	check(!src.needsAuth, 'Voyager source asks for a login');
+	check(src.authRealm === '', `Voyager realm '${src.authRealm}'`);
+
+	/* loadSource, on das2C's own Juno 0.6 test node: one that names its realm */
+	{
+		const JUNO = 'https://fixture.invalid/juno_survey_0.6.json';
+		const fx = (url, init) => fetch(url.replace('https://fixture.invalid/', '/das2C/test/das_fetch/'), init);
+		const js = await d.loadSource(JUNO, {fetch: fx});
+		check(js.needsAuth && js.authRealm === 'Juno Magnetospheric Working Group',
+			`Juno login ${js.needsAuth}, realm '${js.authRealm}'`);
+		js.free();
+
+		await expectThrow(d.loadSource(`https://das2.org/catalog/das/site/${VGR}.json`,
+			{fetch: fixtureFetch}), /Collection node, not a data source/, 'loadSource on a container');
+
+		/* A source is still refused as a catalog seed */
+		const seeded = d.newCatalog({seed: JUNO, fetch: fx});
+		await expectThrow(seeded.open(), /not a container; see DasRuntime.loadSource/, 'source as a seed');
+		seeded.free();
+	}
+	check(src.examples.length > 0, 'das2 has no examples');
+	const req = src.request(undefined, {time: '2014-08-31T12'});
+	check(req.url.startsWith(VGR_DAS2), `request url ${req.url}`);
+	check(req.url.includes('start_time=2014-08-31T12%3A00%3A00'), `time not in ${req.url}`);
+	log(`INFO: catalog: request ${req.url} (${req.mime || 'no mime'})`);
+	let threw = false;
+	try{ src.request(undefined, {'no.such.key': '1'}); }
+	catch(e){ threw = (e instanceof DasError); }
+	check(threw, 'unknown key accepted');
+	src.free();
+
+	/* A miss names how far the walk got */
+	await expectThrow(site.child('uiowa/cassini'), /cassini/, 'missing branch');
+	cat.free();
+
+	/* A seed URL as an unnamed root, then the same seed given its real name */
+	const UIOWA = 'https://das2.org/catalog/das/site/uiowa.json';
+	const anon = d.newCatalog({seed: UIOWA, fetch: fixtureFetch});
+	const v1 = await anon.resolve('voyager/1');
+	check((await anon.open()).uri === null, 'unnamed seed has a uri');
+	check(v1.uri === 'voyager/1', `path below an unnamed seed: ${v1.uri}`);
+	anon.free();
+
+	const named = d.newCatalog({seed: UIOWA, seedUri: `${SITE}:/uiowa`, fetch: fixtureFetch});
+	const v1n = await named.resolve('voyager/1');
+	check(v1n.uri === `${SITE}:/uiowa/voyager/1`, `named seed child: ${v1n.uri}`);
+	named.free();
+
+	/* Mirror fallback: the first URL of each child is dead */
+	const fb = d.newCatalog({seed: 'https://local/fallback.json', fetch: fixtureFetch});
+	const vg = await fb.resolve('voyager');
+	check(vg.children.length === 2, 'second mirror not used');
+	await expectThrow(fb.resolve('gone'), /gone/, 'every mirror dead');
+	fb.free();
+
+	/* A server that never answers */
+	const hang = d.newCatalog({seed: 'https://hang.invalid/x.json', fetch: fixtureFetch, timeout: 300});
+	await expectThrow(hang.open(), /no answer/, 'silent server');
+	hang.free();
+}
+
+/* Login, against /auth/ on the runner: the das2C mount behind Basic auth,
+ * reached under the other loopback name so it is a second origin and the
+ * preflight runs.  See run.mjs. */
+async function authChecks(d)
+{
+	/* What any correct encoder makes of tester:p<a-umlaut>ss<pi>, from
+	 * Python's base64 over the UTF-8 bytes; btoa() alone would throw on the pi */
+	const login = basicAuth('tester', 'p\u00e4ss\u03c0');
+	check(login === 'Basic dGVzdGVyOnDDpHNzz4A=', `basicAuth gave ${login}`);
+	let threw = false;
+	try{ basicAuth('a:b', 'c'); }
+	catch(e){ threw = (e instanceof DasError); }
+	check(threw, "basicAuth took a user name with ':'");
+
+	const host = location.hostname === 'localhost' ? '127.0.0.1' : 'localhost';
+	const url = `http://${host}:${location.port}/auth/examples/ex17_vector_noframe.d3b`;
+
+	const tries = [[null, 'no login'], [basicAuth('tester', 'wrong'), 'wrong password']];
+	for(const [hdr, what] of tries){
+		try{
+			const strm = await d.fetchStream(url, hdr ? {headers: {Authorization: hdr}} : {});
+			strm.free();
+			check(false, `${what}: no 401`);
+		}
+		catch(e){
+			check(e instanceof DasError && e.status === 401, `${what}: ${e.name} status ${e.status}: ${e.message}`);
+			check(e.realm === 'das2js test', `${what}: realm ${e.realm}`);
+		}
+	}
+
+	const strm = await d.fetchStream(url, {headers: {Authorization: login}});
+	check(strm.length > 0, 'logged in, but no datasets');
+	log(`INFO: login: 401s with realm from ${host}, then ${strm.length} dataset(s) with the password`);
+	strm.free();
+	return d;
+}
+
+main()
+	.then(authChecks)
+	.then(catalogChecks)
+	.catch(e => check(false, `uncaught: ${e.message}\n${e.stack || ''}`))
+	.then(done);

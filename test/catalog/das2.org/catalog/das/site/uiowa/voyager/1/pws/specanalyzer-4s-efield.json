@@ -1,0 +1,42 @@
+{
+   "coordinates": {
+      "frequency": {
+         "name": "Frequency",
+         "title": "Channel Center Frequencies",
+         "units": "Hz"
+      },
+      "time": {
+         "name": "Time",
+         "valid_max": "now",
+         "valid_min": "1977-09-05"
+      }
+   },
+   "data": {
+      "efield": {
+         "name": "Efield",
+         "title": "Electric field intensity",
+         "units": "V m**-1"
+      }
+   },
+   "name": "SpecAnalyzer-4s-Efield",
+   "sci_contacts": [
+      {
+         "email": "william-kurth@uiowa.edu",
+         "name": "Bill Kurth"
+      }
+   ],
+   "sources": {
+      "das2": {
+         "convention": "das2/2.2",
+         "name": "Das2/2.2 Source",
+         "purpose": "primary-stream",
+         "type": "HttpStreamSrc",
+         "urls": [
+            "https://das2.org/catalog/das/site/uiowa/voyager/1/pws/specanalyzer-4s-efield/das2.json"
+         ]
+      }
+   },
+   "title": "Electric Field averages and peaks from the Voyager 1 PWS Spectrum Analyzer",
+   "type": "Collection",
+   "version": "0.5"
+}

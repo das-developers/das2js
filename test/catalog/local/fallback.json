@@ -1,0 +1,24 @@
+{
+   "type": "Catalog",
+   "version": "0.5",
+   "name": "Fallback",
+   "title": "Hand-made test node: the first mirror of each child is dead",
+   "separator": "/",
+   "catalog": {
+      "voyager": {
+         "type": "Catalog",
+         "title": "Voyager, reached through the second mirror",
+         "urls": [
+            "https://nowhere.invalid/catalog/das/site/uiowa/voyager.json",
+            "https://das2.org/catalog/das/site/uiowa/voyager.json"
+         ]
+      },
+      "gone": {
+         "type": "Catalog",
+         "title": "Every mirror dead",
+         "urls": [
+            "https://nowhere.invalid/gone.json"
+         ]
+      }
+   }
+}

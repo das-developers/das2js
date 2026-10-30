@@ -1,0 +1,63 @@
+{
+  "type": "SourceSet",
+  "version": "0.1",
+  "coords": {
+    "time": {
+      "label": "Time",
+      "validRange": [
+        "2025-09-26T01:54",
+        "2026-07-14T22:22"
+      ]
+    }
+  },
+  "data": {
+    "ts1_l2_bac_tscs": {
+      "label": "B!ac!n in TS1_TSCS"
+    },
+    "ts1_l2_bac_fac": {
+      "label": "B!ac!n in TS1_FAC"
+    }
+  },
+  "contacts": [
+    {
+      "type": "scientific",
+      "name": "George Hospodarsky"
+    }
+  ],
+  "catalog": {
+    "flex": {
+      "type": "HttpStreamSrc",
+      "purpose": "primary-stream",
+      "label": "DasFlex Source",
+      "description": "A successor to das2 DSDFs. Provides multiple output formats and dataset operations along with a user interface definition.",
+      "mime": "application/json",
+      "provides": [
+        "application/vnd.das2.das2stream",
+        "application/vnd.das.stream",
+        "text/vnd.das2.das2stream",
+        "text/vnd.das.stream",
+        "text/csv",
+        "application/x-cdf"
+      ],
+      "urls": [
+        "https://space.physics.uiowa.edu/das/stream/source/tracers/tracers-1/l2/msc_bac/flex.json"
+      ]
+    },
+    "das2": {
+      "type": "Das2DSDF",
+      "purpose": "primary-stream",
+      "label": "Das2 DSDF",
+      "description": "A variable resolution data source description with optional parameters accessed via a static API",
+      "mime": "text/vnd.das2.das2stream",
+      "provides": [
+        "application/vnd.das2.das2stream"
+      ],
+      "urls": [
+        "https://space.physics.uiowa.edu/das/stream/source/tracers/tracers-1/l2/msc_bac/das2.d2t"
+      ]
+    }
+  },
+  "name": "TS1_L2_MSC_BAC",
+  "label": "MSC BAC",
+  "title": "TRACERS-1 MSC: Magnetic Field, 2 kHz Level 2"
+}

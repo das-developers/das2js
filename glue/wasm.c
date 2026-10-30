@@ -1034,3 +1034,97 @@ char* daswasm_desc_json(const DasDesc* pDesc)
 	if(b.err){ free(b.s); return NULL; }
 	return b.s;
 }
+
+/* ************************************************************************* */
+/* Catalog node snapshot */
+
+static const char* _node_kind_tok(das_node_type_e nt)
+{
+	switch(nt){
+	case d2node_catalog:    return "catalog";
+	case d2node_collection: return "collection";
+	case d2node_srcset:     return "srcset";
+	case d2node_stream_src: return "stream_src";
+	case d2node_file_agg:   return "file_agg";
+	case d2node_spdf_cat:   return "spdf_cat";
+	case d2node_spase_cat:  return "spase_cat";
+	default:                return "inv";
+	}
+}
+
+/* _jb_str writes "" for NULL, but a node field that is absent and one that
+   is empty mean different things to a caller */
+static void _jb_strOrNull(JBuf* b, const char* s)
+{
+	if(s == NULL) _jb_null(b);
+	else _jb_str(b, s);
+}
+
+/* The stub goes through as the server wrote it.  Fields beyond type and
+   urls (provides, validRange, purpose ...) vary by server and age, and a
+   tree view wants whichever ones are there. */
+static void _jb_stub(JBuf* b, const DasJdo* pStub)
+{
+	size_t uLen = 0;
+	char* sStub = (pStub == NULL) ? NULL : (char*)DasJdo_writeMinified(pStub, &uLen);
+	if(sStub == NULL){ _jb_null(b); return; }
+	_jb_item(b);
+	_jb_raw(b, sStub);
+	free(sStub);
+}
+
+char* daswasm_node_json(const DasNode* pNode)
+{
+	if(pNode == NULL) return NULL;
+	JBuf b = {NULL, 0, 0, 0};
+
+	const DasJdo* pType = DasNode_getJdo(pNode, D2FRAG_TYPE);
+
+	_jb_open(&b, "{");
+	_jb_key(&b, "ptr");         _jb_int(&b, (long long)(uintptr_t)pNode);
+	_jb_key(&b, "kind");        _jb_str(&b, _node_kind_tok(DasNode_type(pNode)));
+	_jb_key(&b, "type");        _jb_strOrNull(&b, pType ? DasJdo_string(pType) : NULL);
+	_jb_key(&b, "version");     _jb_strOrNull(&b, DasNode_version(pNode));
+	_jb_key(&b, "name");        _jb_strOrNull(&b, DasNode_name(pNode));
+	_jb_key(&b, "label");       _jb_strOrNull(&b, DasNode_label(pNode));
+	_jb_key(&b, "title");       _jb_strOrNull(&b, DasNode_title(pNode));
+	_jb_key(&b, "description"); _jb_strOrNull(&b, DasNode_summary(pNode));
+	_jb_key(&b, "uri");         _jb_strOrNull(&b, DasNode_pathUri(pNode));
+	_jb_key(&b, "url");         _jb_str(&b, DasNode_srcUrl(pNode));
+	_jb_key(&b, "separator");   _jb_strOrNull(&b, DasNode_pathSep(pNode));
+
+	_jb_key(&b, "children");
+	_jb_open(&b, "[");
+	size_t uKids = DasNode_subCount(pNode);
+	for(size_t u = 0; u < uKids; ++u){
+		_jb_open(&b, "{");
+		_jb_key(&b, "name"); _jb_str(&b, DasNode_subName(pNode, u));
+		_jb_key(&b, "kind"); _jb_str(&b, _node_kind_tok(DasNode_subType(pNode, u)));
+		_jb_key(&b, "stub"); _jb_stub(&b, DasNode_subStub(pNode, u));
+		_jb_raw(&b, "}");
+	}
+	_jb_raw(&b, "]");
+
+	/* Counted first: the names are borrowed, so only the pointer array is
+	   allocated here */
+	_jb_key(&b, "loadable");
+	_jb_open(&b, "[");
+	size_t uLoad = dassrc_loadable(pNode, NULL, 0);
+	if(uLoad > 0){
+		const char** aNames = (const char**)calloc(uLoad, sizeof(const char*));
+		if(aNames == NULL){
+			b.err = das_error(DASERR_DS, "Couldn't allocate a loadable list");
+		}
+		else{
+			dassrc_loadable(pNode, aNames, uLoad);
+			for(size_t u = 0; u < uLoad; ++u) _jb_str(&b, aNames[u]);
+			free(aNames);
+		}
+	}
+	_jb_raw(&b, "]");
+
+	_jb_raw(&b, "}");
+
+	if(b.err){ free(b.s); return NULL; }
+	return b.s;
+}

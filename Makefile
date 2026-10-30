@@ -150,6 +150,28 @@ endif
 #   downstream a slow path, don't give them a footgun.
 #
 # The 1 MiB stack stays: das2C has large automatics.
+#
+# The catalog functions below are exported straight from libdas3.a, no glue.
+# das2C's node, walk and source API is already flat (pointers, sizes, C
+# strings), and wrapping each in a one line daswasm_ call would only make a
+# second copy of its docs.  Their declarations are in das3/node.h,
+# das3/source.h and das3/req.h.
+
+DAS2C_EXPORTS=\
+ new_DasNode_json del_DasNode \
+ new_DasNodeWalk new_DasNodeWalk_seed del_DasNodeWalk DasNodeWalk_state \
+ DasNodeWalk_urlCount DasNodeWalk_url DasNodeWalk_uri DasNodeWalk_feed \
+ DasNodeWalk_fail DasNodeWalk_result DasNodeWalk_nearest \
+ new_DasSrc_node del_DasSrc DasSrc_title DasSrc_needsAuth DasSrc_authRealm \
+ DasSrc_exampleCount DasSrc_exampleLabel DasSrc_newReq DasSrc_mime \
+ DasStreamSrc_url \
+ del_DasReq DasReq_set
+
+# emcc wants one comma separated list with a leading underscore on each name
+EMPTY:=
+SPACE:=$(EMPTY) $(EMPTY)
+COMMA:=,
+MOD_EXPORTS=$(subst $(SPACE),$(COMMA),$(strip _malloc _free $(addprefix _,$(DAS2C_EXPORTS))))
 
 MODULE=$(WBD)/das2c.mjs
 JS_SRCS=$(wildcard src/*.mjs)
@@ -157,7 +179,7 @@ JS_OUT=$(patsubst src/%,$(WBD)/%,$(JS_SRCS))
 WASM_MOD_LFLAGS=--use-port=zlib -sMODULARIZE=1 -sEXPORT_ES6=1 \
  -sEXPORT_NAME=createDas3Module -sENVIRONMENT=web,worker -sFILESYSTEM=0 \
  -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1048576 \
- -sEXPORTED_FUNCTIONS=_malloc,_free \
+ -sEXPORTED_FUNCTIONS=$(MOD_EXPORTS) \
  -sEXPORTED_RUNTIME_METHODS=cwrap,HEAPU8,HEAP32 \
  -Wno-limited-postlink-optimizations
 
@@ -228,6 +250,7 @@ endif
 
 headless_test: module
 	$(NODE) test/browser/run.mjs
+	$(NODE) test/browser/run.mjs 'Catalog.html?check=1'
 
 # Same runner, real server: needs the network and a public dasFlex that is up
 live_test: module

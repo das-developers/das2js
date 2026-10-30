@@ -1,0 +1,16 @@
+{
+  "version": "0.5",
+  "type": "Catalog",
+  "label": "L2",
+  "title": "TRACERS-1 Level 2: Public science datasets",
+  "catalog": {
+    "msc_bac": {
+      "urls": [
+        "https://space.physics.uiowa.edu/das/stream/source/tracers/tracers-1/l2/msc_bac.json"
+      ],
+      "label": "MSC BAC",
+      "title": "TRACERS-1 MSC: Magnetic Field, 2 kHz Level 2",
+      "type": "SourceSet"
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+	"name": "das2js",
+	"version": "0.0.0",
+	"private": true,
+	"description": "Read das streams and walk das catalogs in web browsers: das2C compiled to WebAssembly",
+	"license": "SEE LICENSE IN LICENSE",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/das-developers/das2js.git"
+	},
+	"exports": {
+		".": "./build.wasm32/das2js.mjs",
+		"./catalog-tree": "./build.wasm32/das-catalog-tree.mjs"
+	},
+	"files": [
+		"build.wasm32/das2js.mjs",
+		"build.wasm32/das2c.mjs",
+		"build.wasm32/das2c.wasm",
+		"build.wasm32/das-catalog-tree.mjs"
+	],
+	"sideEffects": [
+		"./build.wasm32/das-catalog-tree.mjs"
+	]
+}
