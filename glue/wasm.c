@@ -790,67 +790,73 @@ static void _jb_props(JBuf* b, const DasDesc* pDesc)
 	_jb_raw(b, "}");
 }
 
-/* Parse one <ops> parameter value by the DASPROP_* type the form reports.
-   sysorder is special-cased as an integer list until das2C reports it that
-   way itself (das2C issue #38); it is the one parameter a plotting client
-   must read, so guessing from the string would be worse than a stopgap. */
-static void _jb_opsParam(JBuf* b, const char* sName, const char* sVal, ubyte uType)
+/* One <ops> parameter as a plain JSON value, parsed by the type das2C
+   reports.  Unlike _jb_props there is no {type, value, units} wrapper: a
+   formalism's parameter set is small and fixed per kind, so JS reads
+   ops.sysorder directly.  Integers are plain numbers here, not BigInt text;
+   the only integer parameters are component slots (0 to 8).
+   
+   DasProp's own converters do the splitting, so this never needs to know
+   that sysorder's items are separated by ';'. */
+#define OPS_MAX_ITEMS 16
+static void _jb_opsParam(JBuf* b, const DasProp* pProp)
 {
-	ubyte uBase = uType & DASPROP_TYPE_MASK;
-	ubyte uMulti = uType & DASPROP_MULTI_MASK;
-	bool bIntList = (strcmp(sName, "sysorder") == 0)||
-	                ((uBase == DASPROP_INT)&&(uMulti == DASPROP_SET));
+	ubyte uType  = DasProp_type(pProp);
+	ubyte uBase  = uType & DASPROP_TYPE_MASK;
+	bool  bMulti = ((uType & DASPROP_MULTI_MASK) != DASPROP_SINGLE);
 
-	_jb_key(b, sName);
-	if(bIntList){
-		_jb_open(b, "[");
-		const char* p = sVal;
-		while(*p != '\0'){
-			char* pEnd = NULL;
-			long n = strtol(p, &pEnd, 10);
-			if(pEnd == p) break;
-			_jb_int(b, n);
-			p = pEnd;
-			while((*p == ';')||(*p == ' ')) ++p;
-		}
-		_jb_raw(b, "]");
-		return;
-	}
+	_jb_key(b, DasProp_name(pProp));
+
+	int n = 0;
 	switch(uBase){
-	case DASPROP_BOOL: _jb_bool(b, strcmp(sVal, "true") == 0); break;
-	case DASPROP_INT:  _jb_int(b, strtol(sVal, NULL, 10));    break;
-	case DASPROP_REAL: _jb_real(b, strtod(sVal, NULL));       break;
-	default:           _jb_str(b, sVal);                      break;
+	case DASPROP_INT: {
+		int64_t aVal[OPS_MAX_ITEMS];
+		n = DasProp_convertInt(pProp, aVal, OPS_MAX_ITEMS);
+		if(bMulti) _jb_open(b, "[");
+		for(int i = 0; i < n; ++i) _jb_int(b, (long long)aVal[i]);
+		if(bMulti) _jb_raw(b, "]");
+		break;
 	}
+	case DASPROP_REAL: {
+		double aVal[OPS_MAX_ITEMS];
+		n = DasProp_convertReal(pProp, aVal, OPS_MAX_ITEMS);
+		if(bMulti) _jb_open(b, "[");
+		for(int i = 0; i < n; ++i) _jb_real(b, aVal[i]);
+		if(bMulti) _jb_raw(b, "]");
+		break;
+	}
+	case DASPROP_BOOL: {
+		uint8_t aVal[OPS_MAX_ITEMS];
+		n = DasProp_convertBool(pProp, aVal, OPS_MAX_ITEMS);
+		if(bMulti) _jb_open(b, "[");
+		for(int i = 0; i < n; ++i) _jb_bool(b, aVal[i]);
+		if(bMulti) _jb_raw(b, "]");
+		break;
+	}
+	default:
+		/* string, and every parameter of a kind das2C does not know */
+		_jb_str(b, DasProp_value(pProp));
+		n = 1;
+		break;
+	}
+
+	/* A scalar that failed to convert left a key with no value, which would
+	   be invalid JSON.  das_error has already said why. */
+	if((n < 1)&&(!bMulti)) _jb_null(b);
 }
 
-/* {kind, ...parameters}.  Only a generic (unrecognized kind) form can
-   enumerate its parameters today, so known kinds are asked by name from a
-   list of every attribute the das2C formalisms define.  Replace the list
-   with DasForm_paramAt() when das2C issue #38 lands. */
+/* {kind, ...parameters}.  Every parameter the form holds, defaults included,
+   so JS never has to know that a missing system= means cartesian. */
 static void _jb_ops(JBuf* b, const DasForm* pForm)
 {
-	static const char* asKnown[] = {
-		"frame", "system", "sysorder", "from", "to", "body", "surface",
-		"fixed", "symmetry", NULL
-	};
 	_jb_open(b, "{");
-	_jb_key(b, "kind"); _jb_str(b, DasForm_kindStr(pForm));
+	_jb_key(b, "kind"); _jb_str(b, DasForm_kind(pForm));
 
-	const char* sName = NULL;
-	const char* sVal = NULL;
-	for(int i = 0; DasFormGeneric_paramAt(pForm, i, &sName, &sVal); ++i)
-		if((sName != NULL)&&(sVal != NULL)&&(strcmp(sName, "kind") != 0))
-			_jb_opsParam(b, sName, sVal, DASPROP_STRING | DASPROP_SINGLE);
+	das_form_param_buf buf;
+	const DasProp* pProp = NULL;
+	for(int i = 0; (pProp = DasForm_paramAt(pForm, i, &buf)) != NULL; ++i)
+		_jb_opsParam(b, pProp);
 
-	if(!DasForm_isKind(pForm, DAS_FORM_EXT)){
-		for(int i = 0; asKnown[i] != NULL; ++i){
-			ubyte uType = DASPROP_STRING | DASPROP_SINGLE;
-			sVal = DasForm_getParam(pForm, asKnown[i], &uType);
-			if(sVal != NULL)
-				_jb_opsParam(b, asKnown[i], sVal, uType);
-		}
-	}
 	_jb_raw(b, "}");
 }
 
